@@ -92,7 +92,7 @@ async def handle_name(message: Message, state: FSMContext):
     await message.answer(
         f"👤 Ism: <b>{name}</b>\n\n"
         "📱 <b>Telefon raqamingizni yozing:</b>\n"
-        "<i>Masalan: +998 93 107 13 08</i>",
+        "<i>Masalan: +998 77 777 77 77</i>",
         parse_mode="HTML",
         reply_markup=cancel_kb()
     )
