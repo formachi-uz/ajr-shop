@@ -76,8 +76,8 @@ async def contact_info(message: Message):
     await message.answer(
         "📞 <b>Biz bilan bog'lanish:</b>\n\n"
         "👤 Admin: @formachi_admin\n"
-        "📱 Telefon: +998 XX XXX-XX-XX\n"
-        "📍 Manzil: Toshkent\n\n"
-        "⏰ Ish vaqti: 09:00 - 22:00",
+        "📱 Telefon: +998 94 911-51-23\n"
+        "📍 Manzil: Toshkent Uchtepa outlet center B157 do'kon\n\n"
+        "⏰ Ish vaqti: 11:00 - 22:00",
         parse_mode="HTML"
     )
