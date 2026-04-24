@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}{% if product %}Tahrirlash{% else %}Yangi mahsulot{% endif %} — Formachi Admin{% endblock %}
+{% block page_title %}{% if product %}✏️ Mahsulot tahrirlash{% else %}➕ Yangi mahsulot{% endif %}{% endblock %}
+
+{% block content %}
+<div style="max-width:760px;">
+  <form method="post" action="{% if product %}/admin/products/{{ product.id }}/edit{% else %}/admin/products/add{% endif %}">
+
+    <!-- Asosiy ma'lumotlar -->
+    <div class="card mb-6">
+      <h3 style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;margin-bottom:20px;">📦 Asosiy ma'lumotlar</h3>
+      <div class="form-group">
+        <label>Mahsulot nomi *</label>
+        <input type="text" name="name" value="{{ product.name if product else '' }}" placeholder="Masalan: Barcelona 2024/25 uy forması" required>
+      </div>
+      <div class="form-group">
+        <label>Kategoriya *</label>
+        <select name="category_id" required>
+          {% for cat in categories %}
+          <option value="{{ cat.id }}" {% if product and product.category_id == cat.id %}selected{% endif %}>
+            {{ cat.emoji }} {{ cat.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Tavsif</label>
+        <textarea name="description" placeholder="Mahsulot haqida qisqacha ma'lumot...">{{ product.description if product else '' }}</textarea>
+      </div>
+    </div>
+
+    <!-- Narx -->
+    <div class="card mb-6">
+      <h3 style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;margin-bottom:20px;">💰 Narx va skidka</h3>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Narx (so'mda) *</label>
+          <input type="number" name="price" value="{{ product.price|int if product else '' }}" placeholder="250000" min="0" required>
+        </div>
+        <div class="form-group">
+          <label>Skidka (%)</label>
+          <input type="number" name="discount_percent" value="{{ product.discount_percent|int if product else '0' }}" placeholder="0" min="0" max="100">
+        </div>
+      </div>
+    </div>
+
+    <!-- Rasm -->
+    <div class="card mb-6">
+      <h3 style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;margin-bottom:20px;">📸 Rasm</h3>
+      <div class="form-group">
+        <label>Telegram File ID yoki URL</label>
+        <input type="text" name="photo_url" value="{{ product.photo_url if product else '' }}" placeholder="https://... yoki Telegram file_id">
+        <div class="text-muted" style="margin-top:6px;">Botga rasm yuboring → file_id ni nusxalang</div>
+      </div>
+      {% if product %}
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+          <input type="checkbox" name="in_stock" {% if product.in_stock %}checked{% endif %} style="width:auto;">
+          Sotuvda mavjud
+        </label>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- O'lchamlar va Ombor -->
+    <div class="card mb-6">
+      <h3 style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;margin-bottom:8px;">📦 O'lchamlar va Ombor</h3>
+      <div class="text-muted mb-4">
+        Faqat kiritilgan o'lchamlar botda ko'rinadi. 0 qoldirsangiz — ko'rinmaydi.
+      </div>
+
+      <!-- Kiyim o'lchamlari -->
+      <div style="margin-bottom:12px;">
+        <div class="text-muted" style="margin-bottom:8px;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-family:'IBM Plex Mono';">👕 Kiyim (Formalar, Retro)</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+          {% set cloth_sizes = ['XS','S','M','L','XL','XXL','3XL'] %}
+          {% for size in cloth_sizes %}
+            {% set stock_qty = 0 %}
+            {% if product and stocks %}
+              {% for s in stocks %}{% if s.size == size %}{% set stock_qty = s.quantity %}{% endif %}{% endfor %}
+            {% endif %}
+            <div>
+              <label style="text-align:center;display:block;margin-bottom:4px;font-size:13px;font-weight:700;color:var(--text);">{{ size }}</label>
+              <input type="number" name="stock_{{ size }}" value="{{ stock_qty }}" min="0" placeholder="0" style="text-align:center;">
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Poyabzal o'lchamlari -->
+      <div style="margin-top:16px;">
+        <div class="text-muted" style="margin-bottom:8px;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-family:'IBM Plex Mono';">👟 Poyabzal (Butsalar)</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;">
+          {% set shoe_sizes = ['36','37','38','39','40','41','42','43','44','45'] %}
+          {% for size in shoe_sizes %}
+            {% set stock_qty = 0 %}
+            {% if product and stocks %}
+              {% for s in stocks %}{% if s.size == size %}{% set stock_qty = s.quantity %}{% endif %}{% endfor %}
+            {% endif %}
+            <div>
+              <label style="text-align:center;display:block;margin-bottom:4px;font-size:13px;font-weight:700;color:var(--text);">{{ size }}</label>
+              <input type="number" name="stock_{{ size }}" value="{{ stock_qty }}" min="0" placeholder="0" style="text-align:center;">
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {% if product and stocks %}
+      <div style="margin-top:16px;padding:12px;background:var(--surface2);border-radius:8px;">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;font-family:'IBM Plex Mono';">HOZIRGI OMBOR</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          {% for s in stocks %}
+          <span style="padding:4px 12px;border-radius:20px;font-size:12px;font-family:'IBM Plex Mono';
+            background:{% if s.quantity == 0 %}rgba(255,71,87,0.1){% elif s.quantity <= 2 %}rgba(255,165,2,0.1){% else %}rgba(0,229,160,0.1){% endif %};
+            color:{% if s.quantity == 0 %}var(--danger){% elif s.quantity <= 2 %}var(--warning){% else %}var(--accent){% endif %};">
+            {{ s.size }}: {{ s.quantity }} ta
+          </span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="flex gap-3">
+      <button type="submit" class="btn btn-primary" style="flex:1;">
+        {% if product %}✅ Saqlash{% else %}➕ Qo'shish{% endif %}
+      </button>
+      <a href="/admin/products" class="btn btn-secondary">← Bekor</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
