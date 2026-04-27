@@ -29,6 +29,32 @@
       </div>
     </div>
 
+    <!-- Forma turi (Klub / Terma jamoa) -->
+    <div class="card mb-6" id="team-fields">
+      <h3 style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;margin-bottom:8px;">
+        🎯 Forma turi (faqat Formalar / Retro uchun)
+      </h3>
+      <div class="text-muted mb-4">
+        MUHIM: Klub va Terma jamoa formalari aralashmasligi uchun shu maydonni to'ldiring.
+        Boshqa kategoriyalar uchun bo'sh qoldiring.
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Forma turi</label>
+          <select name="team_type">
+            <option value="" {% if not product or not product.team_type %}selected{% endif %}>— Tanlanmagan —</option>
+            <option value="club"     {% if product and product.team_type == 'club' %}selected{% endif %}>🏟 Klub formasi</option>
+            <option value="national" {% if product and product.team_type == 'national' %}selected{% endif %}>🌍 Terma jamoa formasi</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Jamoa nomi</label>
+          <input type="text" name="team" value="{{ product.team if product and product.team else '' }}"
+                 placeholder="Masalan: Real Madrid yoki Argentina">
+        </div>
+      </div>
+    </div>
+
     <!-- Narx -->
     <div class="card mb-6">
       <h3 style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;margin-bottom:20px;">💰 Narx va skidka</h3>

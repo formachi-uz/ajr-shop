@@ -16,9 +16,18 @@ AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_co
 
 
 async def init_db():
-    """Barcha jadvallarni yaratish"""
+    """Barcha jadvallarni yaratish + idempotent migration"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # ── Idempotent migrations (Railway live DB uchun) ──
+        # PostgreSQL: ADD COLUMN IF NOT EXISTS — yangi ustunlarni xavfsiz qo'shadi.
+        # Eski mahsulotlar buzilmaydi: team_type NULL bo'lsa filterda 'club' deb hisoblanadi.
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE products ADD COLUMN IF NOT EXISTS team_type VARCHAR(20)"
+            )
+        except Exception as e:
+            print(f"⚠️ Migration (team_type) skipped: {e}")
     print("✅ Database jadvallari yaratildi!")
 
 

@@ -16,7 +16,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from database.db import init_db, seed_categories
-from bot.handlers import start, catalog, cart, order, admin, review
+from bot.handlers import start, catalog, cart, order, admin, review, search
 from bot.middlewares.admin_check import AdminMiddleware
 
 logging.basicConfig(
@@ -45,8 +45,12 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(AdminMiddleware())
 
+    # MUHIM: search routerini admin'dan OLDIN ulash kerak,
+    # chunki admin'da AddProductState.name handler matnli xabarni "ushlab oladi".
+    # Lekin start, catalog, cart, order kabi standart route'lar avval bo'lishi kerak.
     dp.include_router(start.router)
     dp.include_router(catalog.router)
+    dp.include_router(search.router)
     dp.include_router(cart.router)
     dp.include_router(order.router)
     dp.include_router(admin.router)

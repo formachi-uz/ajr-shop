@@ -3,8 +3,9 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 
 def main_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     buttons = [
-        [KeyboardButton(text="🛍 Katalog"), KeyboardButton(text="🛒 Savatim")],
-        [KeyboardButton(text="📦 Buyurtmalarim"), KeyboardButton(text="📞 Aloqa")],
+        [KeyboardButton(text="🛍 Katalog"), KeyboardButton(text="🔍 Qidiruv")],
+        [KeyboardButton(text="🛒 Savatim"), KeyboardButton(text="📦 Buyurtmalarim")],
+        [KeyboardButton(text="📞 Aloqa"), KeyboardButton(text="ℹ️ Do'kon haqida")],
     ]
     if is_admin:
         buttons.append([KeyboardButton(text="⚙️ Admin Panel")])

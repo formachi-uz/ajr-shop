@@ -179,9 +179,15 @@ async def add_product_submit(
     price: float = Form(...),
     discount_percent: float = Form(0),
     photo_url: str = Form(""),
+    team_type: str = Form(""),
+    team: str = Form(""),
     db: AsyncSession = Depends(get_db)
 ):
     check_auth(request)
+    # team_type — faqat "club" yoki "national"; boshqasi → None
+    tt = team_type.strip().lower() if team_type else ""
+    tt_value = tt if tt in ("club", "national") else None
+    team_value = team.strip() or None
     product = await create_product(
         db,
         name=name,
@@ -190,6 +196,8 @@ async def add_product_submit(
         price=price,
         discount_percent=discount_percent,
         photo_url=photo_url or None,
+        team_type=tt_value,
+        team=team_value,
     )
     # Stock o'lchamlarini saqlash
     from database.crud import set_product_stock
@@ -232,9 +240,14 @@ async def edit_product_submit(
     discount_percent: float = Form(0),
     photo_url: str = Form(""),
     in_stock: str = Form("on"),
+    team_type: str = Form(""),
+    team: str = Form(""),
     db: AsyncSession = Depends(get_db)
 ):
     check_auth(request)
+    tt = team_type.strip().lower() if team_type else ""
+    tt_value = tt if tt in ("club", "national") else None
+    team_value = team.strip() or None
     await update_product(
         db, product_id,
         name=name,
@@ -244,6 +257,8 @@ async def edit_product_submit(
         discount_percent=discount_percent,
         photo_url=photo_url or None,
         in_stock=(in_stock == "on"),
+        team_type=tt_value,
+        team=team_value,
     )
     # Stock yangilash
     from database.crud import set_product_stock
@@ -375,6 +390,8 @@ async def api_products(category_id: int = None, db: AsyncSession = Depends(get_d
             "photo_url": p.photo_url,
             "in_stock": p.in_stock,
             "category_id": p.category_id,
+            "team_type": p.team_type,
+            "team_name": p.team,
             "stocks": stocks,
             "avg_rating": avg_rating,
             "review_count": len(p.reviews),
@@ -420,6 +437,8 @@ async def api_product_detail(product_id: int, db: AsyncSession = Depends(get_db)
         "photo_url": p.photo_url,
         "in_stock": p.in_stock,
         "category_id": p.category_id,
+        "team_type": p.team_type,
+        "team_name": p.team,
         "stocks": stocks,
         "reviews": reviews,
         "avg_rating": avg_rating,

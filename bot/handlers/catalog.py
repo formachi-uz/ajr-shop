@@ -7,12 +7,17 @@ from database.db import AsyncSessionLocal
 from database.models import Product, Category, ProductStock
 from database.crud import (
     get_all_categories, get_category_by_id,
-    get_product_by_id, get_product_stocks
+    get_product_by_id, get_product_stocks,
+    get_team_names_by_type, get_products_by_team,
 )
 
 router = Router()
 
 FORMA_CATEGORIES = [1, 2]
+# Bu kategoriyalar Klublar / Terma jamoalar bo'limini ko'rsatadi.
+# Boshqa kategoriyalar (Butsalar, Ism yozish) — to'g'ridan mahsulot ro'yxati.
+TEAM_FILTERED_CATEGORIES = [1, 2]
+TEAM_TYPE_LABELS = {"club": "🏟 Klublar", "national": "🌍 Terma jamoalar"}
 
 
 def format_price(product) -> str:
@@ -106,6 +111,34 @@ def back_print_kb(product_id: int, buy_now: bool = False) -> InlineKeyboardMarku
         InlineKeyboardButton(text="✅ Ha (+50,000 so'm)", callback_data=f"{prefix}_print_yes_{product_id}"),
         InlineKeyboardButton(text="❌ Yo'q", callback_data=f"{prefix}_print_no_{product_id}"),
     ]])
+
+
+# ─── Team type / Team name keyboards ─────────────────────────────────────────
+def team_type_kb(category_id: int) -> InlineKeyboardMarkup:
+    """Forma kategoriyasi ichida: Klublar yoki Terma jamoalar"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏟 Klublar",        callback_data=f"tt_{category_id}_club")],
+        [InlineKeyboardButton(text="🌍 Terma jamoalar", callback_data=f"tt_{category_id}_national")],
+        [InlineKeyboardButton(text="⬅️ Orqaga",         callback_data="catalog")],
+    ])
+
+
+def teams_list_kb(category_id: int, team_type: str, teams: list[str]) -> InlineKeyboardMarkup:
+    rows = []
+    # 2 ustun
+    row = []
+    for tname in teams:
+        row.append(InlineKeyboardButton(
+            text=tname,
+            callback_data=f"tn_{category_id}_{team_type}_{tname}"
+        ))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"cat_{category_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ─── Helper: mahsulotlarni stocklar bilan yuklash ─────────────────────────────
@@ -202,12 +235,31 @@ async def show_category_products(callback: CallbackQuery):
         if not category:
             await callback.answer("Kategoriya topilmadi!", show_alert=True)
             return
-        # Mahsulot va stocklarni session ichida yuklash
-        products_with_stocks = await _load_products_with_stocks(session, category_id)
-
         cat_name  = category.name
         cat_emoji = category.emoji
         cat_desc  = category.description
+
+    # ─── Forma kategoriyalari uchun Klublar / Terma jamoalar bo'limi ─────
+    if category_id in TEAM_FILTERED_CATEGORIES:
+        text = (
+            f"{cat_emoji} <b>{cat_name}</b>\n"
+            f"{('📝 ' + cat_desc + chr(10)) if cat_desc else ''}\n"
+            "Qaysi turdagi formalarni ko'rmoqchisiz?"
+        )
+        try:
+            await callback.message.edit_text(
+                text, parse_mode="HTML", reply_markup=team_type_kb(category_id)
+            )
+        except Exception:
+            await callback.message.answer(
+                text, parse_mode="HTML", reply_markup=team_type_kb(category_id)
+            )
+        await callback.answer()
+        return
+
+    # ─── Boshqa kategoriyalar (butsalar, ism yozish) — eski oqim ─────────
+    async with AsyncSessionLocal() as session:
+        products_with_stocks = await _load_products_with_stocks(session, category_id)
 
     if not products_with_stocks:
         await callback.answer("😕 Bu kategoriyada hozircha mahsulot yo'q", show_alert=True)
@@ -223,11 +275,138 @@ async def show_category_products(callback: CallbackQuery):
             text, parse_mode="HTML",
             reply_markup=products_kb(products_with_stocks, category_id)
         )
-    except:
+    except Exception:
         await callback.message.answer(
             text, parse_mode="HTML",
             reply_markup=products_kb(products_with_stocks, category_id)
         )
+    await callback.answer()
+
+
+# ─── Forma → Klublar / Terma jamoalar ─────────────────────────────────────────
+@router.callback_query(F.data.startswith("tt_"))
+async def show_team_list(callback: CallbackQuery):
+    """tt_<category_id>_<team_type>"""
+    parts = callback.data.split("_", 2)
+    try:
+        category_id = int(parts[1])
+        team_type   = parts[2]
+    except (IndexError, ValueError):
+        await callback.answer("Noto'g'ri so'rov", show_alert=True)
+        return
+
+    if team_type not in ("club", "national"):
+        await callback.answer("Noto'g'ri tanlov", show_alert=True)
+        return
+
+    async with AsyncSessionLocal() as session:
+        teams = await get_team_names_by_type(session, category_id, team_type)
+
+    if not teams:
+        label = TEAM_TYPE_LABELS.get(team_type, team_type)
+        await callback.answer(
+            f"😕 {label} bo'yicha mahsulotlar hali kiritilmagan", show_alert=True
+        )
+        return
+
+    label = TEAM_TYPE_LABELS.get(team_type, team_type)
+    text = (
+        f"{label}\n\n"
+        f"📦 {len(teams)} ta jamoa mavjud\n\n"
+        "Jamoani tanlang 👇"
+    )
+    try:
+        await callback.message.edit_text(
+            text, parse_mode="HTML",
+            reply_markup=teams_list_kb(category_id, team_type, teams)
+        )
+    except Exception:
+        await callback.message.answer(
+            text, parse_mode="HTML",
+            reply_markup=teams_list_kb(category_id, team_type, teams)
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tn_"))
+async def show_team_products(callback: CallbackQuery):
+    """tn_<category_id>_<team_type>_<team_name>"""
+    parts = callback.data.split("_", 3)
+    try:
+        category_id = int(parts[1])
+        team_type   = parts[2]
+        team_name   = parts[3]
+    except (IndexError, ValueError):
+        await callback.answer("Noto'g'ri so'rov", show_alert=True)
+        return
+
+    if team_type not in ("club", "national"):
+        await callback.answer("Noto'g'ri tanlov", show_alert=True)
+        return
+
+    async with AsyncSessionLocal() as session:
+        # MUHIM: team_type filtri qo'llanadi → klub va terma aralashmaydi.
+        products = await get_products_by_team(session, category_id, team_type, team_name)
+
+        # Stocklarni dict ga o'tkazish
+        products_with_stocks = []
+        for product in products:
+            final_price = product.price * (1 - product.discount_percent / 100) \
+                if product.discount_percent > 0 else product.price
+            prod_dict = {
+                "id": product.id,
+                "name": product.name,
+                "price": product.price,
+                "final_price": final_price,
+                "discount_percent": product.discount_percent,
+                "category_id": product.category_id,
+                "in_stock": product.in_stock,
+                "photo_url": product.photo_url,
+                "description": product.description,
+            }
+            stocks_list = [
+                {"size": s.size, "quantity": s.quantity, "sort_order": s.sort_order}
+                for s in sorted(product.stocks, key=lambda s: s.sort_order)
+            ]
+            products_with_stocks.append((prod_dict, stocks_list))
+
+    if not products_with_stocks:
+        await callback.answer(
+            f"😕 {team_name} bo'yicha mahsulot topilmadi", show_alert=True
+        )
+        return
+
+    label = TEAM_TYPE_LABELS.get(team_type, team_type)
+    text = (
+        f"{label} → <b>{team_name}</b>\n\n"
+        f"📦 {len(products_with_stocks)} ta mahsulot\n\nTanlang 👇"
+    )
+    # Orqaga tugmasi: team_type ro'yxatiga qaytsin
+    rows = []
+    for prod, stocks in products_with_stocks:
+        price_str = f"{int(prod['final_price']):,} so'm"
+        if prod['discount_percent'] > 0:
+            price_str += f" (-{int(prod['discount_percent'])}%)"
+        total_qty = sum(s['quantity'] for s in stocks)
+        if total_qty == 0 and stocks:
+            stock_icon = " ❌"
+        elif 0 < total_qty <= 3:
+            stock_icon = " ⚠️"
+        else:
+            stock_icon = ""
+        rows.append([InlineKeyboardButton(
+            text=f"{prod['name']}{stock_icon} — {price_str}",
+            callback_data=f"prod_{prod['id']}"
+        )])
+    rows.append([InlineKeyboardButton(
+        text="⬅️ Orqaga", callback_data=f"tt_{category_id}_{team_type}"
+    )])
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
+
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=kb)
     await callback.answer()
 
 
