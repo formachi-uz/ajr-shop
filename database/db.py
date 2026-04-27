@@ -19,7 +19,47 @@ async def init_db():
     """Barcha jadvallarni yaratish"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await ensure_runtime_schema(conn)
     print("✅ Database jadvallari yaratildi!")
+
+
+async def ensure_runtime_schema(conn):
+    """Existing Railway databases need additive columns when the product model grows."""
+    statements = [
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS slug VARCHAR(255)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS main_category VARCHAR(50)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS product_type VARCHAR(50)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS team VARCHAR(100)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS season VARCHAR(50)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS kit_type VARCHAR(50)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS league VARCHAR(100)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(100)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS model VARCHAR(100)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS tags TEXT",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS gallery TEXT",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS customization_price FLOAT DEFAULT 50000",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_top_forma BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_premium_boot BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_customizable BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE product_stocks ADD COLUMN IF NOT EXISTS reserved INTEGER DEFAULT 0",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255)",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(20)",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS total_price FLOAT DEFAULT 0",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_file_id VARCHAR(500)",
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS player_name VARCHAR(100)",
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS back_print VARCHAR(100)",
+        "CREATE INDEX IF NOT EXISTS ix_products_team ON products(team)",
+        "CREATE INDEX IF NOT EXISTS ix_products_brand ON products(brand)",
+        "CREATE INDEX IF NOT EXISTS ix_products_main_category ON products(main_category)",
+        "CREATE INDEX IF NOT EXISTS ix_products_product_type ON products(product_type)",
+    ]
+
+    for statement in statements:
+        try:
+            await conn.execute(text(statement))
+        except Exception as exc:
+            print(f"Schema migration skipped: {statement} -> {exc}")
 
 
 async def seed_categories():
