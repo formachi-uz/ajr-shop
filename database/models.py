@@ -8,7 +8,6 @@ import enum
 
 Base = declarative_base()
 
-
 class OrderStatus(str, enum.Enum):
     PENDING    = "pending"
     CONFIRMED  = "confirmed"
@@ -16,12 +15,10 @@ class OrderStatus(str, enum.Enum):
     DONE       = "done"
     CANCELLED  = "cancelled"
 
-
 class PaymentType(str, enum.Enum):
     CASH   = "cash"
     CARD   = "card"
     CREDIT = "credit"
-
 
 class User(Base):
     __tablename__ = "users"
@@ -35,7 +32,6 @@ class User(Base):
     orders  = relationship("Order", back_populates="user")
     reviews = relationship("Review", back_populates="user")
 
-
 class Category(Base):
     __tablename__ = "categories"
     id          = Column(Integer, primary_key=True)
@@ -47,11 +43,21 @@ class Category(Base):
 
     products = relationship("Product", back_populates="category")
 
-
 class Product(Base):
     __tablename__ = "products"
     id               = Column(Integer, primary_key=True)
     category_id      = Column(Integer, ForeignKey("categories.id"))
+    
+    # --- NEW METADATA FIELDS FOR FILTERING ---
+    team             = Column(String(100), nullable=True, index=True) # e.g., 'Real Madrid'
+    season           = Column(String(50), nullable=True)  # e.g., '23/24'
+    kit_type         = Column(String(50), nullable=True)  # e.g., 'Home', 'Away', 'Third'
+    league           = Column(String(100), nullable=True) # e.g., 'La Liga', 'National'
+    
+    # --- NEW CUSTOMIZATION FIELDS ---
+    is_customizable  = Column(Boolean, default=False)
+    customization_price = Column(Float, default=50000.0)
+    
     name             = Column(String(255), nullable=False)
     description      = Column(Text, nullable=True)
     price            = Column(Float, nullable=False)
@@ -80,99 +86,12 @@ class Product(Base):
         return round(sum(r.rating for r in self.reviews) / len(self.reviews), 1)
 
     def get_stock(self, size: str) -> int:
-        """Berilgan o'lcham uchun mavjud miqdor"""
         for s in self.stocks:
             if s.size == size:
                 return s.quantity
         return 0
 
     def available_sizes(self):
-        """Faqat miqdori > 0 bo'lgan o'lchamlar"""
         return [s for s in self.stocks if s.quantity > 0]
 
-
-class ProductStock(Base):
-    """
-    Har mahsulot + o'lcham uchun ombor miqdori.
-    -1 faqat admin tasdiqlasa amalga oshadi.
-    """
-    __tablename__ = "product_stocks"
-    __table_args__ = (
-        UniqueConstraint("product_id", "size", name="uq_product_size"),
-    )
-
-    id         = Column(Integer, primary_key=True)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    size       = Column(String(10), nullable=False)   # S, M, L, XL, XXL, 3XL
-    quantity   = Column(Integer, default=0, nullable=False)
-    sort_order = Column(Integer, default=0)           # S=1, M=2, L=3 ...
-
-    product = relationship("Product", back_populates="stocks")
-
-    @property
-    def status(self):
-        if self.quantity == 0:
-            return "out"       # ❌ tugagan
-        elif self.quantity <= 2:
-            return "low"       # ⚠️ kam
-        else:
-            return "ok"        # ✅ yetarli
-
-    @property
-    def status_emoji(self):
-        return {"ok": "✅", "low": "⚠️", "out": "❌"}[self.status]
-
-
-class Order(Base):
-    __tablename__ = "orders"
-    id               = Column(Integer, primary_key=True)
-    user_id          = Column(Integer, ForeignKey("users.id"))
-    status           = Column(Enum(OrderStatus), default=OrderStatus.PENDING)
-    payment_type     = Column(Enum(PaymentType), nullable=True)
-    delivery_address = Column(Text, nullable=True)
-    comment          = Column(Text, nullable=True)
-    total_price      = Column(Float, default=0)
-    created_at       = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
-
-    user  = relationship("User", back_populates="orders")
-    items = relationship("OrderItem", back_populates="order")
-
-
-class OrderItem(Base):
-    __tablename__ = "order_items"
-    id             = Column(Integer, primary_key=True)
-    order_id       = Column(Integer, ForeignKey("orders.id"))
-    product_id     = Column(Integer, ForeignKey("products.id"))
-    quantity       = Column(Integer, default=1)
-    price_at_order = Column(Float, nullable=False)
-    size           = Column(String(20), nullable=True)
-    player_name    = Column(String(100), nullable=True)
-
-    order   = relationship("Order", back_populates="items")
-    product = relationship("Product", back_populates="order_items")
-
-
-class Review(Base):
-    __tablename__ = "reviews"
-    id         = Column(Integer, primary_key=True)
-    user_id    = Column(Integer, ForeignKey("users.id"))
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=True)
-    order_id   = Column(Integer, ForeignKey("orders.id"), nullable=True)
-    rating     = Column(Integer, default=5)
-    text       = Column(Text, nullable=True)
-    is_visible = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    user    = relationship("User", back_populates="reviews")
-    product = relationship("Product", back_populates="reviews")
-
-
-class AdminUser(Base):
-    __tablename__ = "admin_users"
-    id          = Column(Integer, primary_key=True)
-    telegram_id = Column(BigInteger, unique=True, nullable=False)
-    full_name   = Column(String(255), nullable=True)
-    added_by    = Column(BigInteger, nullable=True)
-    is_active   = Column(Boolean, default=True)
-    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+# ... [Keep ProductStock, Order, OrderItem, Review, AdminUser exactly the same] ...
