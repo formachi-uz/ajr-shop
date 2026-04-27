@@ -71,12 +71,17 @@ class Product(Base):
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False, index=True)
 
     # Filtering metadata
-    team        = Column(String(100), nullable=True, index=True)   # "Real Madrid"
-    season      = Column(String(50),  nullable=True)               # "2024/25"
-    kit_type    = Column(String(50),  nullable=True)               # "home" | "away" | "third"
-    league      = Column(String(100), nullable=True)               # "La Liga" | "National"
-    brand       = Column(String(100), nullable=True, index=True)   # "Nike" | "Adidas"
-    model       = Column(String(100), nullable=True)               # Boot model
+    slug          = Column(String(255), nullable=True, unique=True, index=True)
+    main_category = Column(String(50), nullable=True, index=True)   # FORMLAR | RETRO_FORMALAR | BUTSIYLAR
+    product_type  = Column(String(50), nullable=True, index=True)   # jersey | retro_jersey | boots | socks | accessory
+    team          = Column(String(100), nullable=True, index=True)  # "Real Madrid"
+    season        = Column(String(50),  nullable=True)              # "2024/25"
+    kit_type      = Column(String(50),  nullable=True)              # "home" | "away" | "third"
+    league        = Column(String(100), nullable=True)              # "La Liga" | "National"
+    brand         = Column(String(100), nullable=True, index=True)  # "Nike" | "Adidas"
+    model         = Column(String(100), nullable=True)              # Boot model
+    tags          = Column(Text, nullable=True)                     # comma-separated tags
+    gallery       = Column(Text, nullable=True)                     # comma-separated Telegram file_ids/URLs
 
     # Core fields
     name             = Column(String(255), nullable=False)
@@ -96,8 +101,8 @@ class Product(Base):
     customization_price = Column(Float, default=50000.0)
 
     # Promo flags
-    is_featured    = Column(Boolean, default=False)
-    is_top_forma   = Column(Boolean, default=False)
+    is_featured     = Column(Boolean, default=False)
+    is_top_forma    = Column(Boolean, default=False)
     is_premium_boot = Column(Boolean, default=False)
 
     # Legacy / compat
@@ -113,7 +118,7 @@ class Product(Base):
     order_items = relationship("OrderItem",   back_populates="product")
     reviews     = relationship("Review",      back_populates="product")
 
-    # ── Computed properties ────────────────────────────────────────────────────
+    # ── Computed properties ───────────────────────────────────────────────────
 
     @property
     def final_price(self) -> float:
