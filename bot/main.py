@@ -15,7 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from database.db import init_db, seed_categories
-from bot.handlers import start, catalog, cart, order, admin, review, search
+from bot.handlers import start, catalog, cart, order, admin
 from bot.middlewares.admin_check import AdminMiddleware
 
 logging.basicConfig(
@@ -46,11 +46,9 @@ async def main():
 
     dp.include_router(start.router)
     dp.include_router(catalog.router)
-    dp.include_router(search.router)
     dp.include_router(cart.router)
     dp.include_router(order.router)
     dp.include_router(admin.router)
-    dp.include_router(review.router)
 
     logger.info("✅ Bot ishga tushdi! @Formachi_uz")
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())

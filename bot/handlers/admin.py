@@ -16,7 +16,6 @@ from bot.keyboards.admin_kb import (
     check_confirm_kb, product_manage_kb
 )
 from bot.keyboards.main_menu import main_menu_kb
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 router = Router()
 
@@ -31,8 +30,6 @@ GROUP_CHECKS_ID  = int(os.getenv("GROUP_CHECKS_ID",  "-5284654949"))
 # ─── FSM ──────────────────────────────────────────────────────────────────────
 class AddProductState(StatesGroup):
     category    = State()
-    team_type   = State()   # Faqat forma kategoriyalarida (1, 2): club | national
-    team_name   = State()   # Faqat forma kategoriyalarida: jamoa nomi
     name        = State()
     description = State()
     price       = State()
@@ -198,82 +195,15 @@ async def start_add_product(message: Message, state: FSMContext):
     await message.answer(text, parse_mode="HTML")
 
 
-def _team_type_kb_admin() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏟 Klub formasi",      callback_data="ap_tt_club")],
-        [InlineKeyboardButton(text="🌍 Terma jamoa formasi", callback_data="ap_tt_national")],
-    ])
-
-
 @router.message(AddProductState.category)
-async def add_product_after_category(message: Message, state: FSMContext):
+async def add_product_name(message: Message, state: FSMContext):
     try:
         category_id = int(message.text)
+        await state.update_data(category_id=category_id)
+        await state.set_state(AddProductState.name)
+        await message.answer("✏️ <b>Mahsulot nomini yozing:</b>", parse_mode="HTML")
     except ValueError:
         await message.answer("⚠️ Raqam yuboring")
-        return
-
-    await state.update_data(category_id=category_id, team_type=None, team_name=None)
-
-    # Forma kategoriyalari uchun (1 = Formalar, 2 = Retro Formalar) — team_type so'raymiz
-    if category_id in FORMA_CAT_IDS:
-        await state.set_state(AddProductState.team_type)
-        await message.answer(
-            "🎯 <b>Forma turini tanlang:</b>\n\n"
-            "Bu MUHIM — klublar va terma jamoalar mahsulotlari aralashmasligi uchun.",
-            parse_mode="HTML",
-            reply_markup=_team_type_kb_admin()
-        )
-        return
-
-    await state.set_state(AddProductState.name)
-    await message.answer("✏️ <b>Mahsulot nomini yozing:</b>", parse_mode="HTML")
-
-
-@router.callback_query(AddProductState.team_type, F.data.startswith("ap_tt_"))
-async def add_product_team_type(callback: CallbackQuery, state: FSMContext):
-    team_type = callback.data.split("_", 2)[2]  # "club" | "national"
-    if team_type not in ("club", "national"):
-        await callback.answer("Noto'g'ri tanlov", show_alert=True)
-        return
-    await state.update_data(team_type=team_type)
-    await state.set_state(AddProductState.team_name)
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-    label = "🏟 Klub" if team_type == "club" else "🌍 Terma jamoa"
-    hint = (
-        "<i>Masalan: Real Madrid, Barcelona, Manchester United, Bayern</i>"
-        if team_type == "club"
-        else "<i>Masalan: Argentina, Brazil, France, Germany, Uzbekistan</i>"
-    )
-    await callback.message.answer(
-        f"{label} nomini yozing:\n\n{hint}",
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-
-@router.message(AddProductState.team_name)
-async def add_product_team_name(message: Message, state: FSMContext):
-    team_name = (message.text or "").strip()
-    if len(team_name) < 2 or len(team_name) > 100:
-        await message.answer("⚠️ Jamoa nomi 2-100 ta belgi bo'lishi kerak")
-        return
-    # callback_data limit (64 bayt) ni oshirib yubormaslik uchun
-    if "_" in team_name:
-        await message.answer(
-            "⚠️ Jamoa nomida pastki chiziq (_) ishlatmang. "
-            "Bo'sh joy yoki tire qo'llang.\nQaytadan kiriting:"
-        )
-        return
-    await state.update_data(team_name=team_name)
-    await state.set_state(AddProductState.name)
-    await message.answer(
-        f"✅ Jamoa: <b>{team_name}</b>\n\n✏️ <b>Mahsulot nomini yozing:</b>",
-        parse_mode="HTML"
-    )
 
 
 @router.message(AddProductState.name)
@@ -421,11 +351,6 @@ async def _save_product_final(message: Message, state: FSMContext):
     data = await state.get_data()
     stocks = data.get("stocks", {})
 
-    # MUHIM: forma kategoriyalarida team_type/team_name majburiy.
-    # Boshqa kategoriyalarda — None bo'ladi.
-    team_type = data.get("team_type")
-    team_name = data.get("team_name")
-
     async with AsyncSessionLocal() as session:
         product = await create_product(
             session,
@@ -435,8 +360,6 @@ async def _save_product_final(message: Message, state: FSMContext):
             price=data["price"],
             discount_percent=data.get("discount", 0),
             photo_url=data.get("photo_url"),
-            team_type=team_type,
-            team=team_name,
             is_active=True,
             in_stock=True
         )
@@ -450,15 +373,9 @@ async def _save_product_final(message: Message, state: FSMContext):
     if stocks:
         stocks_text = "\n📦 " + "  ".join(f"{s}:{q}" for s, q in stocks.items())
 
-    team_text = ""
-    if team_type and team_name:
-        type_label = "🏟 Klub" if team_type == "club" else "🌍 Terma"
-        team_text = f"\n{type_label}: <b>{team_name}</b>"
-
     await message.answer(
         f"✅ <b>Mahsulot qo'shildi!</b>\n\n"
-        f"📦 {data['name']}"
-        f"{team_text}\n"
+        f"📦 {data['name']}\n"
         f"💰 {int(data['price']):,} so'm"
         f"{stocks_text}",
         parse_mode="HTML",
@@ -486,7 +403,7 @@ async def list_products(message: Message):
         await message.answer(text, parse_mode="HTML", reply_markup=product_manage_kb(product.id))
 
 
-# ─── NARX O'ZGARTIRISH ──────────���─────────────────────────────────────────────
+# ─── NARX O'ZGARTIRISH ────────────────────────────────────────────────────────
 @router.callback_query(F.data.startswith("edit_price_"))
 async def start_edit_price(callback: CallbackQuery, state: FSMContext):
     product_id = int(callback.data.split("_")[2])
@@ -644,12 +561,18 @@ async def check_confirmed(callback: CallbackQuery, bot: Bot):
                 show_alert=True
             )
             return
-        # update_order_status() PENDING→CONFIRMED bo'lganda
-        # release_stock + decrease_stock ni o'zi avtomatik chaqiradi.
-        # Shuning uchun BU YERDA qo'shimcha decrease_stock CHAQIRMAYMIZ
-        # — aks holda zaxira ikki marta kamayadi (bug).
         await update_order_status(session, order_id, "confirmed")
         order = await get_order_with_items(session, order_id)
+
+    # Stock -1
+    try:
+        from database.crud import decrease_stock
+        async with AsyncSessionLocal() as session:
+            for item in (order.items or []):
+                if item.size:
+                    await decrease_stock(session, item.product_id, item.size, item.quantity)
+    except Exception as e:
+        print(f"Stock decrease xatosi: {e}")
 
     # Tugmalarni o'chirish + kim tasdiqlaganini ko'rsatish
     try:

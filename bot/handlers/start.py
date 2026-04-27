@@ -14,14 +14,12 @@ WELCOME_TEXT = """
 ⚽ <b>Formachi.uz</b> botiga xush kelibsiz!
 
 Biz sizga taqdim etamiz:
-🏟 Klub formalari (Real, Barca, Bayern...)
-🌍 Terma jamoa formalari (Argentina, Brazil...)
+👕 Formalar (terma, klub, bez komanda)
 🏆 Retro formalar
-👟 Butsalar & sarakonjoshkalar
+👟 Butsalar & sarakonjoshkalar  
 ✍️ Futbolkaga ism yozish xizmati
 
-🛍 <b>Katalog</b> — kategoriya/jamoa bo'yicha ko'rish
-🔍 <b>Qidiruv</b> — nom, jamoa yoki brend bo'yicha topish
+🛍 Katalogni ko'rish uchun pastdagi tugmani bosing!
 """
 
 
@@ -81,25 +79,5 @@ async def contact_info(message: Message):
         "📱 Telefon: +998 94 911-51-23\n"
         "📍 Manzil: Toshkent Uchtepa outlet center B157 do'kon\n\n"
         "⏰ Ish vaqti: 11:00 - 22:00",
-        parse_mode="HTML"
-    )
-
-
-@router.message(F.text == "ℹ️ Do'kon haqida")
-async def about_shop(message: Message):
-    await message.answer(
-        "ℹ️ <b>Formachi.uz haqida</b>\n\n"
-        "⚽ Biz O'zbekistondagi futbol shinavandalari uchun "
-        "professional formalar, retro kollektsiyalar, butsalar va "
-        "sport aksessuarlarini taklif etamiz.\n\n"
-        "🛍 <b>Bizda mavjud:</b>\n"
-        "• 🏟 Klub formalari (Real, Barca, Bayern, Man Utd va b.)\n"
-        "• 🌍 Terma jamoa formalari (Argentina, Brazil, Germany va b.)\n"
-        "• 🏆 Retro formalar\n"
-        "• 👟 Butsalar va sarakonjoshkalar\n"
-        "• ✍️ Forma orqasiga ism/raqam yozish xizmati\n\n"
-        "🚚 <b>Yetkazib berish:</b> butun O'zbekiston bo'ylab BTS pochta orqali.\n"
-        "💳 <b>To'lov:</b> Karta / Paynet / Uzum Nasiya.\n\n"
-        "📱 Aloqa: @formachi_admin",
         parse_mode="HTML"
     )

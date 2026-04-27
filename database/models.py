@@ -71,8 +71,7 @@ class Product(Base):
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False, index=True)
 
     # Filtering metadata
-    team        = Column(String(100), nullable=True, index=True)   # team_name: "Real Madrid" | "Argentina"
-    team_type   = Column(String(20),  nullable=True, index=True)   # "club" | "national" (None = club fallback)
+    team        = Column(String(100), nullable=True, index=True)   # "Real Madrid"
     season      = Column(String(50),  nullable=True)               # "2024/25"
     kit_type    = Column(String(50),  nullable=True)               # "home" | "away" | "third"
     league      = Column(String(100), nullable=True)               # "La Liga" | "National"
