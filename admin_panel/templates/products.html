@@ -9,7 +9,10 @@
 
 <div class="flex items-center justify-between mb-6">
   <div class="text-muted">Jami: {{ products|length }} ta mahsulot</div>
-  <a href="/admin/products/add" class="btn btn-primary">＋ Yangi mahsulot</a>
+  <div class="flex gap-2">
+    <a href="/admin/products/bulk-team" class="btn btn-secondary">🎯 Forma turi (Klub/Terma)</a>
+    <a href="/admin/products/add" class="btn btn-primary">＋ Yangi mahsulot</a>
+  </div>
 </div>
 
 <div class="card">
@@ -19,6 +22,7 @@
       <tr>
         <th>Mahsulot</th>
         <th>Kategoriya</th>
+        <th>Forma turi</th>
         <th>Narx</th>
         <th>Skidka</th>
         <th>Holat</th>
@@ -45,6 +49,19 @@
           {% set cat = cat_map.get(product.category_id) %}
           {% if cat %}
           <span style="font-size:13px;">{{ cat.emoji }} {{ cat.name }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if product.category_id in [1, 2] %}
+            {% if product.team_type == 'national' and product.team %}
+              <span class="badge badge-delivering">🌍 {{ product.team }}</span>
+            {% elif product.team_type == 'club' and product.team %}
+              <span class="badge badge-confirmed">🏟 {{ product.team }}</span>
+            {% else %}
+              <span class="badge badge-pending">⚠️ Tag'lanmagan</span>
+            {% endif %}
+          {% else %}
+            <span class="text-muted">—</span>
           {% endif %}
         </td>
         <td><span class="mono" style="font-weight:600;">{{ "{:,}".format(product.price|int) }}</span></td>

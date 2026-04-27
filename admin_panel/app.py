@@ -158,6 +158,69 @@ async def products_page(request: Request, db: AsyncSession = Depends(get_db)):
     })
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# BULK TEAM TAGGING — mavjud forma mahsulotlarini bir varaqdan tag'lash
+# ──────────────────────────────────────────────────────────────────────────────
+
+FORMA_CATEGORY_IDS = (1, 2)  # Formalar, Retro Formalar
+
+
+@app.get("/admin/products/bulk-team", response_class=HTMLResponse)
+async def bulk_team_page(
+    request: Request,
+    only_untagged: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    check_auth(request)
+    products = []
+    for cat_id in FORMA_CATEGORY_IDS:
+        products.extend(await get_products_by_category(db, cat_id))
+    # Sort by category then id desc
+    products.sort(key=lambda p: (p.category_id, -p.id))
+    total_forma = len(products) if not only_untagged else None
+    if only_untagged:
+        all_forma_count = len(products)
+        products = [p for p in products if not p.team_type or not p.team]
+        total_forma = all_forma_count
+    categories = await get_all_categories(db)
+    cat_map = {c.id: c for c in categories}
+    return templates.TemplateResponse("bulk_team.html", {
+        "request": request,
+        "products": products,
+        "cat_map": cat_map,
+        "only_untagged": bool(only_untagged),
+        "total_forma": total_forma,
+    })
+
+
+@app.post("/admin/products/bulk-team")
+async def bulk_team_submit(request: Request, db: AsyncSession = Depends(get_db)):
+    check_auth(request)
+    form = await request.form()
+    # Forma uchun ID lar form'da `pid_<id>=on` bilan keladi
+    updated = 0
+    skipped = 0
+    for key in form.keys():
+        if not key.startswith("pid_"):
+            continue
+        try:
+            pid = int(key.split("_", 1)[1])
+        except ValueError:
+            continue
+        tt = (form.get(f"team_type_{pid}", "") or "").strip().lower()
+        team_name = (form.get(f"team_{pid}", "") or "").strip()
+        # Faqat "club"/"national" qabul qilamiz; aks holda — tegmaymiz.
+        if tt not in ("club", "national") or not team_name:
+            skipped += 1
+            continue
+        await update_product(db, pid, team_type=tt, team=team_name)
+        updated += 1
+    return RedirectResponse(
+        url=f"/admin/products/bulk-team?updated={updated}&skipped={skipped}",
+        status_code=302,
+    )
+
+
 @app.get("/admin/products/add", response_class=HTMLResponse)
 async def add_product_page(request: Request, db: AsyncSession = Depends(get_db)):
     check_auth(request)

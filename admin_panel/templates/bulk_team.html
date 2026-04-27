@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Forma turi (Klub/Terma) — Formachi Admin{% endblock %}
+{% block page_title %}Forma turi: Klub vs Terma jamoa{% endblock %}
+
+{% block content %}
+{% if request.query_params.get('updated') %}
+<div class="alert alert-success">
+  ✅ {{ request.query_params.get('updated') }} ta mahsulot yangilandi.
+  {% if request.query_params.get('skipped') and request.query_params.get('skipped')|int > 0 %}
+    {{ request.query_params.get('skipped') }} ta o'tkazib yuborildi (forma turi yoki jamoa nomi to'ldirilmagan).
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card mb-6">
+  <h3 style="font-family:'Bebas Neue';font-size:20px;letter-spacing:1px;margin-bottom:8px;">
+    🎯 Mavjud forma mahsulotlarini bir varaqda tag'lang
+  </h3>
+  <div class="text-muted" style="line-height:1.6;">
+    Bu sahifa <b>faqat Formalar va Retro Formalar</b> kategoriyalaridagi mahsulotlarni ko'rsatadi.
+    Har bir mahsulot uchun <b>Forma turi</b> va <b>Jamoa nomi</b>ni belgilang.
+    Saqlash tugmasi <b>faqat ikkala maydon to'ldirilgan</b> qatorlarni yangilaydi —
+    bo'sh qoldirilganlar tegmaydi.
+  </div>
+  <div class="flex gap-2 mb-4" style="margin-top:16px;flex-wrap:wrap;">
+    <a href="/admin/products/bulk-team"
+       class="btn {% if not only_untagged %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">
+      📋 Hammasi
+    </a>
+    <a href="/admin/products/bulk-team?only_untagged=1"
+       class="btn {% if only_untagged %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">
+      ⚠️ Faqat tag'lanmaganlar
+    </a>
+    <a href="/admin/products" class="btn btn-secondary btn-sm">⬅️ Mahsulotlar ro'yxatiga</a>
+  </div>
+</div>
+
+{% if products %}
+<form method="post" action="/admin/products/bulk-team">
+  <div class="card" style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px;"></th>
+          <th>Mahsulot</th>
+          <th>Kategoriya</th>
+          <th style="width:200px;">Forma turi</th>
+          <th style="width:240px;">Jamoa nomi</th>
+          <th>Hozir</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in products %}
+        <tr>
+          <td>
+            <input type="checkbox" name="pid_{{ p.id }}" checked
+                   style="width:auto;margin:0;cursor:pointer;">
+          </td>
+          <td>
+            <div style="display:flex;align-items:center;gap:10px;">
+              {% if p.photo_url %}
+              <img src="{{ p.photo_url }}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;background:var(--surface2);" onerror="this.style.display='none'">
+              {% else %}
+              <div style="width:36px;height:36px;background:var(--surface2);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px;">👕</div>
+              {% endif %}
+              <div>
+                <div style="font-weight:600;font-size:13px;">{{ p.name }}</div>
+                <div class="text-muted">ID: {{ p.id }}</div>
+              </div>
+            </div>
+          </td>
+          <td>
+            {% set cat = cat_map.get(p.category_id) %}
+            {% if cat %}
+              <span style="font-size:12px;">{{ cat.emoji }} {{ cat.name }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <select name="team_type_{{ p.id }}" style="font-size:13px;padding:8px 10px;">
+              <option value=""           {% if not p.team_type %}selected{% endif %}>— Tanlanmagan —</option>
+              <option value="club"       {% if p.team_type == 'club' %}selected{% endif %}>🏟 Klub</option>
+              <option value="national"   {% if p.team_type == 'national' %}selected{% endif %}>🌍 Terma</option>
+            </select>
+          </td>
+          <td>
+            <input type="text" name="team_{{ p.id }}"
+                   value="{{ p.team or '' }}"
+                   placeholder="Real Madrid yoki Argentina"
+                   style="font-size:13px;padding:8px 10px;">
+          </td>
+          <td>
+            {% if p.team_type and p.team %}
+              {% if p.team_type == 'national' %}
+                <span class="badge badge-delivering">🌍 {{ p.team }}</span>
+              {% else %}
+                <span class="badge badge-confirmed">🏟 {{ p.team }}</span>
+              {% endif %}
+            {% else %}
+              <span class="badge badge-pending">⚠️ Tag'lanmagan</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="flex items-center justify-between mb-6" style="margin-top:24px;">
+    <div class="text-muted">
+      {% if only_untagged %}
+        Tag'lanmaganlar: <b>{{ products|length }}</b> / Jami forma: <b>{{ total_forma }}</b>
+      {% else %}
+        Jami forma: <b>{{ products|length }}</b>
+      {% endif %}
+    </div>
+    <button type="submit" class="btn btn-primary">💾 Hammasini saqlash</button>
+  </div>
+</form>
+{% else %}
+<div class="card">
+  <div style="text-align:center;padding:40px;color:var(--text-muted);">
+    <div style="font-size:36px;margin-bottom:8px;">🎉</div>
+    {% if only_untagged %}
+      Barcha forma mahsulotlari tag'langan! Yoki forma kategoriyasida mahsulot yo'q.
+    {% else %}
+      Forma kategoriyalarida (Formalar / Retro) mahsulot topilmadi.
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
