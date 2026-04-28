@@ -22,6 +22,7 @@ from bot.handlers import (
     catalog,
     cart,
     order_delivery_patch,
+    order_bulk_live_patch,
     order_live_patch,
     order,
     admin_gallery,
@@ -76,6 +77,7 @@ async def main():
     dp.include_router(catalog.router)
     dp.include_router(cart.router)
     dp.include_router(order_delivery_patch.router)
+    dp.include_router(order_bulk_live_patch.router)
     dp.include_router(order_live_patch.router)
     dp.include_router(order.router)
     dp.include_router(admin_gallery.router)
