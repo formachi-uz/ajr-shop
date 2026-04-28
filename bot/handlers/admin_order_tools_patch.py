@@ -5,9 +5,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
-from bot.handlers.admin_delivery_patch import delivery_kb, is_yandex_order
-from bot.handlers.admin_status_patch import delivering_kb
-from bot.keyboards.admin_kb import admin_menu_kb, order_actions_kb
+from bot.handlers.admin_delivery_patch import is_yandex_order
+from bot.keyboards.admin_kb import admin_menu_kb
 from bot.middlewares.admin_check import is_admin
 from database.db import AsyncSessionLocal
 from database.models import Order, OrderItem, OrderStatus, User
@@ -29,7 +28,7 @@ class AdminNoteState(StatesGroup):
     waiting_note = State()
 
 
-def order_tools_kb(order) -> InlineKeyboardMarkup | None:
+def order_tools_kb(order) -> InlineKeyboardMarkup:
     rows = []
     if order.status == OrderStatus.PENDING:
         rows.append([
@@ -54,9 +53,8 @@ def order_tools_kb(order) -> InlineKeyboardMarkup | None:
 
 @router.message(F.text == "🔍 Order qidirish")
 async def start_order_search_message(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    await start_order_search(message, state)
+    if is_admin(message.from_user.id):
+        await start_order_search(message, state)
 
 
 @router.callback_query(F.data == "admin_order_search")
@@ -202,6 +200,7 @@ async def save_admin_note(message: Message, state: FSMContext):
 
 async def find_orders(query: str) -> list[Order]:
     clean = query.replace("#", "").strip()
+    digits = "".join(ch for ch in query if ch.isdigit())
     async with AsyncSessionLocal() as session:
         stmt = (
             select(Order)
@@ -213,15 +212,19 @@ async def find_orders(query: str) -> list[Order]:
             stmt = stmt.where(Order.id == int(clean))
         else:
             pattern = f"%{query}%"
-            phone_pattern = f"%{''.join(ch for ch in query if ch.isdigit())}%"
-            stmt = stmt.join(User, Order.user_id == User.id).where(or_(
+            conditions = [
                 Order.customer_name.ilike(pattern),
-                Order.customer_phone.ilike(phone_pattern),
                 User.full_name.ilike(pattern),
-                User.phone.ilike(phone_pattern),
                 Order.delivery_address.ilike(pattern),
                 Order.comment.ilike(pattern),
-            ))
+            ]
+            if len(digits) >= 3:
+                phone_pattern = f"%{digits}%"
+                conditions.extend([
+                    Order.customer_phone.ilike(phone_pattern),
+                    User.phone.ilike(phone_pattern),
+                ])
+            stmt = stmt.join(User, Order.user_id == User.id).where(or_(*conditions))
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
