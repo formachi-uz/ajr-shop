@@ -37,6 +37,7 @@ async def ensure_runtime_schema(conn):
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS model VARCHAR(100)",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS tags TEXT",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS gallery TEXT",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS customization_status VARCHAR(30) DEFAULT 'NOT_AVAILABLE'",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS customization_price FLOAT DEFAULT 50000",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT FALSE",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_top_forma BOOLEAN DEFAULT FALSE",
