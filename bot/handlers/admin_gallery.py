@@ -1,3 +1,4 @@
+import asyncio
 import re
 import traceback
 from aiogram import Router
@@ -20,7 +21,7 @@ class GalleryState(StatesGroup):
 
 @router.message(admin.AddProductState.photo)
 async def collect_main_product_photo(message: Message, state: FSMContext):
-    """Collect the main image, then allow 2-3 optional gallery images."""
+    """Collect the main image, then allow optional gallery images."""
     photo_url = None
     if message.photo:
         photo_url = message.photo[-1].file_id
@@ -71,10 +72,10 @@ async def ask_product_stocks_or_save(message: Message, state: FSMContext):
     cat_id = data.get("category_id", 0)
 
     if cat_id == 4:
-        await save_product_final(message, state)
+        await state.clear()
+        await save_product_from_data(message, data, {})
         return
 
-    # Keep this flow isolated from the old admin stock handler.
     await state.set_state(GalleryState.stocks)
 
     if cat_id == 3:
@@ -97,6 +98,15 @@ async def ask_product_stocks_or_save(message: Message, state: FSMContext):
 
 @router.message(GalleryState.stocks)
 async def save_product_with_gallery_stocks(message: Message, state: FSMContext):
+    await accept_and_save_stock_message(message, state)
+
+
+@router.message(admin.AddProductState.stocks)
+async def save_legacy_stock_state(message: Message, state: FSMContext):
+    await accept_and_save_stock_message(message, state)
+
+
+async def accept_and_save_stock_message(message: Message, state: FSMContext):
     parsed = parse_stock_text(message.text or "")
 
     if not parsed:
@@ -108,51 +118,59 @@ async def save_product_with_gallery_stocks(message: Message, state: FSMContext):
         )
         return
 
-    await state.update_data(stocks=parsed)
+    data = await state.get_data()
+    data["stocks"] = parsed
+
+    # Clear immediately so the next admin command is not swallowed as another stock message.
+    await state.clear()
     await message.answer("✅ O'lchamlar qabul qilindi, mahsulot saqlanyapti...")
 
     try:
-        await save_product_final(message, state)
+        await asyncio.wait_for(save_product_from_data(message, data, parsed), timeout=20)
+    except asyncio.TimeoutError:
+        await message.answer(
+            "❌ Saqlash 20 soniyada yakunlanmadi. State tozalandi, bot ishlayveradi.\n"
+            "Railway/PostgreSQL sekin javob berdi. Mahsulot ro'yxatda chiqmasa, qayta qo'shib ko'ramiz.",
+            parse_mode="HTML",
+        )
     except Exception as exc:
         traceback.print_exc()
         await message.answer(
-            "❌ Mahsulotni saqlashda xato bo'ldi.\n"
+            "❌ Mahsulotni saqlashda xato bo'ldi. State tozalandi.\n"
             f"<code>{type(exc).__name__}: {str(exc)[:900]}</code>\n\n"
-            "Iltimos, shu xabarni menga yuboring, darhol to'g'rilaymiz.",
+            "Shu xabarni menga yuboring, aniq joyini tuzataman.",
             parse_mode="HTML",
         )
 
 
-# Fallback: if Telegram session is already in the old state, accept it once and move through the safe flow.
-@router.message(admin.AddProductState.stocks)
-async def save_legacy_stock_state(message: Message, state: FSMContext):
-    await state.set_state(GalleryState.stocks)
-    await save_product_with_gallery_stocks(message, state)
+async def save_product_from_data(message: Message, data: dict, stocks: dict[str, int]):
+    missing = [key for key in ("category_id", "name", "price") if key not in data]
+    if missing:
+        raise ValueError(f"FSM data missing: {', '.join(missing)}")
 
-
-async def save_product_final(message: Message, state: FSMContext):
-    data = await state.get_data()
-    stocks = data.get("stocks", {})
+    product_kwargs = dict(
+        category_id=data["category_id"],
+        name=data["name"],
+        description=data.get("description"),
+        price=data["price"],
+        discount_percent=data.get("discount", 0),
+        photo_url=data.get("photo_url"),
+        is_active=True,
+        in_stock=True,
+    )
+    if data.get("gallery"):
+        product_kwargs["gallery"] = data.get("gallery")
 
     async with AsyncSessionLocal() as session:
-        product_kwargs = dict(
-            category_id=data["category_id"],
-            name=data["name"],
-            description=data.get("description"),
-            price=data["price"],
-            discount_percent=data.get("discount", 0),
-            photo_url=data.get("photo_url"),
-            is_active=True,
-            in_stock=True,
-        )
-        if data.get("gallery"):
-            product_kwargs["gallery"] = data.get("gallery")
+        try:
+            product = await create_product(session, **product_kwargs)
+        except TypeError:
+            # Older runtime/model without gallery support: save the product, then keep bot usable.
+            product_kwargs.pop("gallery", None)
+            product = await create_product(session, **product_kwargs)
 
-        product = await create_product(session, **product_kwargs)
         for size, qty in stocks.items():
             await set_product_stock(session, product.id, size, qty)
-
-    await state.clear()
 
     stocks_text = ""
     if stocks:
@@ -164,7 +182,7 @@ async def save_product_final(message: Message, state: FSMContext):
     await message.answer(
         f"✅ <b>Mahsulot qo'shildi!</b>\n\n"
         f"📦 {data['name']}\n"
-        f"💰 {int(data['price']):,} so'm"
+        f"💰 {int(float(data['price'])):,} so'm"
         f"{stocks_text}"
         f"{gallery_text}",
         parse_mode="HTML",
@@ -187,29 +205,10 @@ def parse_stock_text(value: str) -> dict[str, int]:
 
 
 def normalize_stock_text(value: str) -> str:
-    # Telegram desktop sometimes sends visually similar Cyrillic letters.
     table = str.maketrans({
-        "А": "A",
-        "В": "B",
-        "Е": "E",
-        "К": "K",
-        "М": "M",
-        "Н": "H",
-        "О": "O",
-        "Р": "P",
-        "С": "C",
-        "Т": "T",
-        "Х": "X",
-        "а": "A",
-        "в": "B",
-        "е": "E",
-        "к": "K",
-        "м": "M",
-        "н": "H",
-        "о": "O",
-        "р": "P",
-        "с": "C",
-        "т": "T",
-        "х": "X",
+        "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H",
+        "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X",
+        "а": "A", "в": "B", "е": "E", "к": "K", "м": "M", "н": "H",
+        "о": "O", "р": "P", "с": "C", "т": "T", "х": "X",
     })
     return value.translate(table).upper().replace("：", ":").replace(";", " ").replace("/", " ")
