@@ -1,4 +1,5 @@
 import re
+import traceback
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -73,8 +74,8 @@ async def ask_product_stocks_or_save(message: Message, state: FSMContext):
         await save_product_final(message, state)
         return
 
-    # Use the legacy state too; this router is registered before admin.router and handles it robustly.
-    await state.set_state(admin.AddProductState.stocks)
+    # Keep this flow isolated from the old admin stock handler.
+    await state.set_state(GalleryState.stocks)
 
     if cat_id == 3:
         size_hint = "37:5 38:10 39:8 40:3 41:5 42:2"
@@ -95,7 +96,6 @@ async def ask_product_stocks_or_save(message: Message, state: FSMContext):
 
 
 @router.message(GalleryState.stocks)
-@router.message(admin.AddProductState.stocks)
 async def save_product_with_gallery_stocks(message: Message, state: FSMContext):
     parsed = parse_stock_text(message.text or "")
 
@@ -109,7 +109,25 @@ async def save_product_with_gallery_stocks(message: Message, state: FSMContext):
         return
 
     await state.update_data(stocks=parsed)
-    await save_product_final(message, state)
+    await message.answer("✅ O'lchamlar qabul qilindi, mahsulot saqlanyapti...")
+
+    try:
+        await save_product_final(message, state)
+    except Exception as exc:
+        traceback.print_exc()
+        await message.answer(
+            "❌ Mahsulotni saqlashda xato bo'ldi.\n"
+            f"<code>{type(exc).__name__}: {str(exc)[:900]}</code>\n\n"
+            "Iltimos, shu xabarni menga yuboring, darhol to'g'rilaymiz.",
+            parse_mode="HTML",
+        )
+
+
+# Fallback: if Telegram session is already in the old state, accept it once and move through the safe flow.
+@router.message(admin.AddProductState.stocks)
+async def save_legacy_stock_state(message: Message, state: FSMContext):
+    await state.set_state(GalleryState.stocks)
+    await save_product_with_gallery_stocks(message, state)
 
 
 async def save_product_final(message: Message, state: FSMContext):
@@ -117,18 +135,20 @@ async def save_product_final(message: Message, state: FSMContext):
     stocks = data.get("stocks", {})
 
     async with AsyncSessionLocal() as session:
-        product = await create_product(
-            session,
+        product_kwargs = dict(
             category_id=data["category_id"],
             name=data["name"],
             description=data.get("description"),
             price=data["price"],
             discount_percent=data.get("discount", 0),
             photo_url=data.get("photo_url"),
-            gallery=data.get("gallery"),
             is_active=True,
             in_stock=True,
         )
+        if data.get("gallery"):
+            product_kwargs["gallery"] = data.get("gallery")
+
+        product = await create_product(session, **product_kwargs)
         for size, qty in stocks.items():
             await set_product_stock(session, product.id, size, qty)
 
