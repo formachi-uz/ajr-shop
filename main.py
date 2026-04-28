@@ -16,7 +16,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from database.db import init_db, seed_categories
-from bot.handlers import start, catalog, cart, order, admin_gallery, admin, review
+from bot.handlers import start, catalog_patch, catalog, cart, order, admin_gallery, admin, review
 from bot.middlewares.admin_check import AdminMiddleware
 
 logging.basicConfig(
@@ -46,6 +46,7 @@ async def main():
     dp.message.middleware(AdminMiddleware())
 
     dp.include_router(start.router)
+    dp.include_router(catalog_patch.router)
     dp.include_router(catalog.router)
     dp.include_router(cart.router)
     dp.include_router(order.router)
