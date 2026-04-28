@@ -13,6 +13,7 @@ router = Router()
 
 def delivering_kb(order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏷 Trek raqam", callback_data=f"admin_track_{order_id}")],
         [InlineKeyboardButton(text="✔️ Yetkazildi", callback_data=f"admin_done_{order_id}")],
         [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"admin_cancel_{order_id}")],
     ])
