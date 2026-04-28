@@ -20,6 +20,9 @@ def order_actions_kb(order_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"admin_confirm_{order_id}"),
             InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"admin_cancel_{order_id}"),
         ],
+        [
+            InlineKeyboardButton(text="🔔 Chek eslatish", callback_data=f"admin_remind_payment_{order_id}"),
+        ],
     ])
 
 
