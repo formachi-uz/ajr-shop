@@ -24,6 +24,7 @@ from bot.handlers import (
     order_delivery_patch,
     order,
     admin_gallery,
+    receipt_patch,
     admin_delivery_patch,
     admin_menu_patch,
     admin_order_tools_patch,
@@ -74,6 +75,7 @@ async def main():
     dp.include_router(order_delivery_patch.router)
     dp.include_router(order.router)
     dp.include_router(admin_gallery.router)
+    dp.include_router(receipt_patch.router)
     dp.include_router(admin_delivery_patch.router)
     dp.include_router(admin_menu_patch.router)
     dp.include_router(admin_order_tools_patch.router)
