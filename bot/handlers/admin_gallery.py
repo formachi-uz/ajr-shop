@@ -13,6 +13,39 @@ from database.crud import create_product, set_product_stock
 
 router = Router()
 
+ADMIN_MENU_TEXTS = {
+    "⚙️ Admin Panel",
+    "✅ Tasdiqlangan buyurtmalar",
+    "📋 Yangi buyurtmalar",
+    "➕ Mahsulot qo'shish",
+    "📦 Mahsulotlar",
+    "👥 Adminlar",
+    "🌐 Web Panel",
+    "🏠 Asosiy menyu",
+    "🛍 Katalog",
+    "🛒 Savatim",
+    "📦 Buyurtmalarim",
+    "📞 Aloqa",
+}
+
+MAIN_CATEGORY_BY_ID = {
+    1: "FORMLAR",
+    2: "RETRO_FORMALAR",
+    3: "BUTSIYLAR",
+}
+
+PRODUCT_TYPE_BY_ID = {
+    1: "jersey",
+    2: "retro_jersey",
+    3: "boots",
+}
+
+CUSTOMIZATION_BY_ID = {
+    1: "available_paid",
+    2: "not_available",
+    3: "not_available",
+}
+
 
 class GalleryState(StatesGroup):
     gallery = State()
@@ -54,7 +87,15 @@ async def collect_product_gallery(message: Message, state: FSMContext):
         return
 
     text = (message.text or "").strip()
-    if text and text.lower() not in {"-", "tayyor", "done"}:
+    if text in ADMIN_MENU_TEXTS:
+        await state.clear()
+        await message.answer(
+            "ℹ️ Mahsulot qo'shish bekor qilindi. Kerakli bo'lim tugmasini yana bir marta bosing.",
+            reply_markup=admin_menu_kb(),
+        )
+        return
+
+    if text and text.lower() not in {"-", "tayyor", "done", "готово"}:
         gallery_items.extend([item.strip() for item in text.split(",") if item.strip()])
         await state.update_data(gallery_items=gallery_items, gallery=",".join(gallery_items))
         await message.answer(
@@ -69,7 +110,7 @@ async def collect_product_gallery(message: Message, state: FSMContext):
 
 async def ask_product_stocks_or_save(message: Message, state: FSMContext):
     data = await state.get_data()
-    cat_id = data.get("category_id", 0)
+    cat_id = int(data.get("category_id", 0) or 0)
 
     if cat_id == 4:
         await state.clear()
@@ -82,8 +123,8 @@ async def ask_product_stocks_or_save(message: Message, state: FSMContext):
         size_hint = "37:5 38:10 39:8 40:3 41:5 42:2"
         size_info = "Butsalar uchun: 36-45 raqamli o'lchamlar"
     else:
-        size_hint = "S:5 M:10 L:8 XL:3"
-        size_info = "Kiyimlar uchun: XS S M L XL XXL 3XL"
+        size_hint = "S:5 M:10 L:8 XL:3 2XL:1"
+        size_info = "Kiyimlar uchun: XS S M L XL 2XL 3XL"
 
     await message.answer(
         f"📦 <b>O'lchamlar va miqdorni kiriting:</b>\n\n"
@@ -107,12 +148,24 @@ async def save_legacy_stock_state(message: Message, state: FSMContext):
 
 
 async def accept_and_save_stock_message(message: Message, state: FSMContext):
-    parsed = parse_stock_text(message.text or "")
+    text = (message.text or "").strip()
+    if text in ADMIN_MENU_TEXTS:
+        await state.clear()
+        await message.answer(
+            "ℹ️ Mahsulot qo'shish bekor qilindi. Kerakli bo'lim tugmasini yana bir marta bosing.",
+            reply_markup=admin_menu_kb(),
+        )
+        return
+
+    parsed = parse_stock_text(text)
 
     if not parsed:
+        data = await state.get_data()
+        cat_id = int(data.get("category_id", 0) or 0)
+        example = "37:5 38:10 39:8 40:3" if cat_id == 3 else "S:5 M:10 L:8 XL:3"
         await message.answer(
             "⚠️ Format noto'g'ri. Qaytadan kiriting:\n"
-            "<code>S:5 M:10 L:8 XL:3</code>\n"
+            f"<code>{example}</code>\n"
             "yoki <code>S=5, M=10, L=8, XL=3</code>",
             parse_mode="HTML",
         )
@@ -121,7 +174,7 @@ async def accept_and_save_stock_message(message: Message, state: FSMContext):
     data = await state.get_data()
     data["stocks"] = parsed
 
-    # Clear immediately so the next admin command is not swallowed as another stock message.
+    # Clear immediately so the next admin command is never swallowed as another stock message.
     await state.clear()
     await message.answer("✅ O'lchamlar qabul qilindi, mahsulot saqlanyapti...")
 
@@ -132,6 +185,7 @@ async def accept_and_save_stock_message(message: Message, state: FSMContext):
             "❌ Saqlash 20 soniyada yakunlanmadi. State tozalandi, bot ishlayveradi.\n"
             "Railway/PostgreSQL sekin javob berdi. Mahsulot ro'yxatda chiqmasa, qayta qo'shib ko'ramiz.",
             parse_mode="HTML",
+            reply_markup=admin_menu_kb(),
         )
     except Exception as exc:
         traceback.print_exc()
@@ -140,6 +194,7 @@ async def accept_and_save_stock_message(message: Message, state: FSMContext):
             f"<code>{type(exc).__name__}: {str(exc)[:900]}</code>\n\n"
             "Shu xabarni menga yuboring, aniq joyini tuzataman.",
             parse_mode="HTML",
+            reply_markup=admin_menu_kb(),
         )
 
 
@@ -148,12 +203,27 @@ async def save_product_from_data(message: Message, data: dict, stocks: dict[str,
     if missing:
         raise ValueError(f"FSM data missing: {', '.join(missing)}")
 
+    category_id = int(data["category_id"])
     product_kwargs = dict(
-        category_id=data["category_id"],
+        category_id=category_id,
+        main_category=data.get("main_category") or MAIN_CATEGORY_BY_ID.get(category_id),
+        product_type=data.get("product_type") or PRODUCT_TYPE_BY_ID.get(category_id),
+        team=data.get("team"),
+        season=data.get("season"),
+        kit_type=data.get("kit_type"),
+        league=data.get("league"),
+        brand=data.get("brand"),
+        model=data.get("model"),
+        tags=data.get("tags"),
+        customization_status=data.get("customization_status") or CUSTOMIZATION_BY_ID.get(category_id, "not_available"),
+        customization_price=data.get("customization_price", 50000),
+        is_featured=bool(data.get("is_featured", False)),
+        is_top_forma=bool(data.get("is_top_forma", False)),
+        is_premium_boot=bool(data.get("is_premium_boot", False)),
         name=data["name"],
         description=data.get("description"),
-        price=data["price"],
-        discount_percent=data.get("discount", 0),
+        price=float(data["price"]),
+        discount_percent=float(data.get("discount", 0) or 0),
         photo_url=data.get("photo_url"),
         is_active=True,
         in_stock=True,
@@ -165,8 +235,25 @@ async def save_product_from_data(message: Message, data: dict, stocks: dict[str,
         try:
             product = await create_product(session, **product_kwargs)
         except TypeError:
-            # Older runtime/model without gallery support: save the product, then keep bot usable.
-            product_kwargs.pop("gallery", None)
+            # Older runtime/model without new metadata support: save the product, then keep bot usable.
+            for key in (
+                "gallery",
+                "main_category",
+                "product_type",
+                "team",
+                "season",
+                "kit_type",
+                "league",
+                "brand",
+                "model",
+                "tags",
+                "customization_status",
+                "customization_price",
+                "is_featured",
+                "is_top_forma",
+                "is_premium_boot",
+            ):
+                product_kwargs.pop(key, None)
             product = await create_product(session, **product_kwargs)
 
         for size, qty in stocks.items():
@@ -194,14 +281,26 @@ def parse_stock_text(value: str) -> dict[str, int]:
     text = normalize_stock_text(value)
     parsed: dict[str, int] = {}
 
-    for size, qty_text in re.findall(r"([A-Z0-9]{1,4})\s*[:=]\s*(\d+)", text):
-        if size not in admin.SIZES:
+    for size, qty_text in re.findall(r"([A-Z0-9]{1,4})\s*[:=\-]\s*(\d+)", text):
+        size_label = normalize_size_label(size)
+        if size_label not in valid_sizes():
             continue
         qty = int(qty_text)
         if qty > 0:
-            parsed[size] = qty
+            parsed[size_label] = qty
 
     return parsed
+
+
+def valid_sizes() -> set[str]:
+    return set(admin.SIZES) | {"2XL", "XXL"}
+
+
+def normalize_size_label(value: str) -> str:
+    label = value.strip().upper()
+    if label in {"2XL", "XXL", "XLL"}:
+        return "XXL"
+    return label
 
 
 def normalize_stock_text(value: str) -> str:
@@ -211,4 +310,11 @@ def normalize_stock_text(value: str) -> str:
         "а": "A", "в": "B", "е": "E", "к": "K", "м": "M", "н": "H",
         "о": "O", "р": "P", "с": "C", "т": "T", "х": "X",
     })
-    return value.translate(table).upper().replace("：", ":").replace(";", " ").replace("/", " ")
+    return (
+        value.translate(table)
+        .upper()
+        .replace("：", ":")
+        .replace(";", " ")
+        .replace("/", " ")
+        .replace(",", " ")
+    )
