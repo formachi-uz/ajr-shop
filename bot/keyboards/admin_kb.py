@@ -4,13 +4,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 def admin_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="✅ Tasdiqlangan buyurtmalar"), KeyboardButton(text="📋 Yangi buyurtmalar")],
-            [KeyboardButton(text="🚚 Yetkazilayotgan"), KeyboardButton(text="📊 Statistika")],
-            [KeyboardButton(text="➕ Mahsulot qo'shish"), KeyboardButton(text="📦 Mahsulotlar")],
-            [KeyboardButton(text="🔎 Mahsulot qidirish"), KeyboardButton(text="📦 Stock boshqarish")],
-            [KeyboardButton(text="🚕 Toshkent/Yandex"), KeyboardButton(text="📉 Kam qolgan stock")],
-            [KeyboardButton(text="📢 Xabar yuborish"), KeyboardButton(text="🌐 Web Panel")],
-            [KeyboardButton(text="👥 Adminlar"), KeyboardButton(text="🧹 Bazani tozalash")],
+            [KeyboardButton(text="🧾 Buyurtmalar")],
+            [KeyboardButton(text="📦 Mahsulotlar bo'limi")],
+            [KeyboardButton(text="📢 Marketing"), KeyboardButton(text="📊 Hisobotlar")],
+            [KeyboardButton(text="⚙️ Sozlamalar")],
             [KeyboardButton(text="🏠 Asosiy menyu")],
         ],
         resize_keyboard=True
