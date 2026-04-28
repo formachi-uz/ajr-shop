@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 def admin_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🧾 Buyurtmalar")],
+            [KeyboardButton(text="🧾 Buyurtmalar"), KeyboardButton(text="🔍 Order qidirish")],
             [KeyboardButton(text="📦 Mahsulotlar bo'limi")],
             [KeyboardButton(text="📢 Marketing"), KeyboardButton(text="📊 Hisobotlar")],
             [KeyboardButton(text="⚙️ Sozlamalar")],
