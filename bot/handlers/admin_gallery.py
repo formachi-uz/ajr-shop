@@ -1,3 +1,4 @@
+import re
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -72,7 +73,8 @@ async def ask_product_stocks_or_save(message: Message, state: FSMContext):
         await save_product_final(message, state)
         return
 
-    await state.set_state(GalleryState.stocks)
+    # Use the legacy state too; this router is registered before admin.router and handles it robustly.
+    await state.set_state(admin.AddProductState.stocks)
 
     if cat_id == 3:
         size_hint = "37:5 38:10 39:8 40:3 41:5 42:2"
@@ -93,28 +95,15 @@ async def ask_product_stocks_or_save(message: Message, state: FSMContext):
 
 
 @router.message(GalleryState.stocks)
+@router.message(admin.AddProductState.stocks)
 async def save_product_with_gallery_stocks(message: Message, state: FSMContext):
-    text = (message.text or "").strip().upper()
-    parsed = {}
-
-    for part in text.replace(",", " ").split():
-        if ":" not in part:
-            continue
-        size, qty_str = part.split(":", 1)
-        size = size.strip()
-        if size not in admin.SIZES:
-            continue
-        try:
-            qty = int(qty_str.strip())
-        except ValueError:
-            continue
-        if qty > 0:
-            parsed[size] = qty
+    parsed = parse_stock_text(message.text or "")
 
     if not parsed:
         await message.answer(
             "⚠️ Format noto'g'ri. Qaytadan kiriting:\n"
-            "<code>S:5 M:10 L:8 XL:3</code>",
+            "<code>S:5 M:10 L:8 XL:3</code>\n"
+            "yoki <code>S=5, M=10, L=8, XL=3</code>",
             parse_mode="HTML",
         )
         return
@@ -161,3 +150,46 @@ async def save_product_final(message: Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=admin_menu_kb(),
     )
+
+
+def parse_stock_text(value: str) -> dict[str, int]:
+    text = normalize_stock_text(value)
+    parsed: dict[str, int] = {}
+
+    for size, qty_text in re.findall(r"([A-Z0-9]{1,4})\s*[:=]\s*(\d+)", text):
+        if size not in admin.SIZES:
+            continue
+        qty = int(qty_text)
+        if qty > 0:
+            parsed[size] = qty
+
+    return parsed
+
+
+def normalize_stock_text(value: str) -> str:
+    # Telegram desktop sometimes sends visually similar Cyrillic letters.
+    table = str.maketrans({
+        "А": "A",
+        "В": "B",
+        "Е": "E",
+        "К": "K",
+        "М": "M",
+        "Н": "H",
+        "О": "O",
+        "Р": "P",
+        "С": "C",
+        "Т": "T",
+        "Х": "X",
+        "а": "A",
+        "в": "B",
+        "е": "E",
+        "к": "K",
+        "м": "M",
+        "н": "H",
+        "о": "O",
+        "р": "P",
+        "с": "C",
+        "т": "T",
+        "х": "X",
+    })
+    return value.translate(table).upper().replace("：", ":").replace(";", " ").replace("/", " ")
