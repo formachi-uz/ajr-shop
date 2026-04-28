@@ -34,23 +34,23 @@ ADMIN_MENU_TEXTS = {
 MAIN_CATEGORY_BY_ID = {1: "FORMLAR", 2: "RETRO_FORMALAR", 3: "BUTSIYLAR"}
 PRODUCT_TYPE_BY_ID = {1: "jersey", 2: "retro_jersey", 3: "boots"}
 CUSTOMIZATION_BY_ID = {
-    1: CustomizationStatus.AVAILABLE_PAID,
-    2: CustomizationStatus.NOT_AVAILABLE,
-    3: CustomizationStatus.NOT_AVAILABLE,
+    1: CustomizationStatus.AVAILABLE_PAID.value,
+    2: CustomizationStatus.NOT_AVAILABLE.value,
+    3: CustomizationStatus.NOT_AVAILABLE.value,
 }
 CUSTOMIZATION_ALIASES = {
-    "paid": CustomizationStatus.AVAILABLE_PAID,
-    "available_paid": CustomizationStatus.AVAILABLE_PAID,
-    "pullik": CustomizationStatus.AVAILABLE_PAID,
-    "ha": CustomizationStatus.AVAILABLE_PAID,
-    "bonus": CustomizationStatus.INCLUDED_BONUS,
-    "included_bonus": CustomizationStatus.INCLUDED_BONUS,
-    "bepul": CustomizationStatus.INCLUDED_BONUS,
-    "no": CustomizationStatus.NOT_AVAILABLE,
-    "none": CustomizationStatus.NOT_AVAILABLE,
-    "not_available": CustomizationStatus.NOT_AVAILABLE,
-    "yoq": CustomizationStatus.NOT_AVAILABLE,
-    "yo'q": CustomizationStatus.NOT_AVAILABLE,
+    "paid": CustomizationStatus.AVAILABLE_PAID.value,
+    "available_paid": CustomizationStatus.AVAILABLE_PAID.value,
+    "pullik": CustomizationStatus.AVAILABLE_PAID.value,
+    "ha": CustomizationStatus.AVAILABLE_PAID.value,
+    "bonus": CustomizationStatus.INCLUDED_BONUS.value,
+    "included_bonus": CustomizationStatus.INCLUDED_BONUS.value,
+    "bepul": CustomizationStatus.INCLUDED_BONUS.value,
+    "no": CustomizationStatus.NOT_AVAILABLE.value,
+    "none": CustomizationStatus.NOT_AVAILABLE.value,
+    "not_available": CustomizationStatus.NOT_AVAILABLE.value,
+    "yoq": CustomizationStatus.NOT_AVAILABLE.value,
+    "yo'q": CustomizationStatus.NOT_AVAILABLE.value,
 }
 
 
@@ -296,8 +296,8 @@ async def send_save_error(message: Message, detail: str):
 
 def normalize_customization_status(value):
     if isinstance(value, CustomizationStatus):
-        return value
-    return CUSTOMIZATION_ALIASES.get(str(value or "").strip().lower(), CustomizationStatus.NOT_AVAILABLE)
+        return value.value
+    return CUSTOMIZATION_ALIASES.get(str(value or "").strip().lower(), CustomizationStatus.NOT_AVAILABLE.value)
 
 
 def parse_stock_text(value: str) -> dict[str, int]:
