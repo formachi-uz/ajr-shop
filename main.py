@@ -32,6 +32,7 @@ from bot.handlers import (
     admin_reset_patch,
     automation_patch,
     admin_product_edit_patch,
+    admin_payment_patch,
     admin,
     review,
 )
@@ -81,6 +82,7 @@ async def main():
     dp.include_router(admin_reset_patch.router)
     dp.include_router(automation_patch.router)
     dp.include_router(admin_product_edit_patch.router)
+    dp.include_router(admin_payment_patch.router)
     dp.include_router(admin.router)
     dp.include_router(review.router)
 
