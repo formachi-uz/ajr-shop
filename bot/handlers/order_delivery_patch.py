@@ -1,12 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-)
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -19,7 +12,7 @@ router = Router()
 
 class DeliveryAreaState(StatesGroup):
     waiting_area = State()
-    waiting_tashkent_location = State()
+    waiting_tashkent_address = State()
 
 
 def delivery_area_kb() -> InlineKeyboardMarkup:
@@ -27,17 +20,6 @@ def delivery_area_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🏙 Toshkent shahri", callback_data="delivery_area_tashkent")],
         [InlineKeyboardButton(text="🚚 Viloyatlar", callback_data="delivery_area_regions")],
     ])
-
-
-def location_request_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📍 Lokatsiyani yuborish", request_location=True)],
-            [KeyboardButton(text="❌ Bekor qilish")],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
 
 
 @router.message(order.OrderState.waiting_phone)
@@ -52,7 +34,7 @@ async def handle_phone_with_delivery_area(message: Message, state: FSMContext):
     await message.answer(
         f"📱 Telefon: <b>{phone}</b>\n\n"
         "📍 <b>Yetkazib berish hududini tanlang:</b>\n\n"
-        "🏙 <b>Toshkent shahri</b> — Yandex orqali, lokatsiya yuborasiz\n"
+        "🏙 <b>Toshkent shahri</b> — Yandex orqali yetkaziladi, manzil yozasiz\n"
         "🚚 <b>Viloyatlar</b> — pochta orqali, manzil yozasiz",
         parse_mode="HTML",
         reply_markup=delivery_area_kb(),
@@ -76,51 +58,43 @@ async def choose_regions(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(DeliveryAreaState.waiting_area, F.data == "delivery_area_tashkent")
 async def choose_tashkent(callback: CallbackQuery, state: FSMContext):
     await state.update_data(delivery_area="tashkent", delivery_method="yandex")
-    await state.set_state(DeliveryAreaState.waiting_tashkent_location)
+    await state.set_state(DeliveryAreaState.waiting_tashkent_address)
     await callback.message.answer(
         "🏙 <b>Toshkent shahri</b>\n\n"
         "Buyurtma Yandex orqali yetkaziladi.\n"
-        "Iltimos, boradigan joy lokatsiyasini yuboring.",
+        "Iltimos, aniq manzilingizni yozing.\n\n"
+        "<i>Masalan: Chilonzor tumani, 12-kvartal, 45-uy, 18-xonadon</i>",
         parse_mode="HTML",
-        reply_markup=location_request_kb(),
+        reply_markup=cancel_kb(),
     )
     await callback.answer()
 
 
-@router.message(DeliveryAreaState.waiting_tashkent_location)
-async def handle_tashkent_location(message: Message, state: FSMContext):
-    if not message.location:
+@router.message(DeliveryAreaState.waiting_tashkent_address)
+async def handle_tashkent_address(message: Message, state: FSMContext):
+    address_text = (message.text or "").strip()
+    if len(address_text) < 8:
         await message.answer(
-            "📍 Iltimos, Telegram lokatsiya yuboring.\n"
-            "Pastdagi <b>📍 Lokatsiyani yuborish</b> tugmasini bosing.",
-            parse_mode="HTML",
-            reply_markup=location_request_kb(),
+            "⚠️ Manzil juda qisqa. Toshkentdagi tuman, ko'cha/uy/xonadon yoki mo'ljalni yozing.",
+            reply_markup=cancel_kb(),
         )
         return
 
-    latitude = message.location.latitude
-    longitude = message.location.longitude
-    location_url = f"https://maps.google.com/?q={latitude},{longitude}"
-    address = f"Toshkent shahri | Yandex lokatsiya: {latitude:.6f}, {longitude:.6f}"
-
+    address = f"Toshkent shahri | Yandex manzil: {address_text}"
     await state.update_data(
         address=address,
         delivery_area="tashkent",
         delivery_method="yandex",
-        delivery_latitude=latitude,
-        delivery_longitude=longitude,
-        delivery_location_url=location_url,
     )
     await state.set_state(order.OrderState.waiting_confirm)
-    await send_order_summary(message, state, address, location_url)
+    await send_order_summary(message, state, address)
 
 
-async def send_order_summary(message: Message, state: FSMContext, address: str, location_url: str | None = None):
+async def send_order_summary(message: Message, state: FSMContext, address: str):
     data = await state.get_data()
     cart = get_cart(message.from_user.id)
     cart_text = format_cart_text(cart)
 
-    location_line = f"\n🗺 <a href='{location_url}'>Lokatsiyani ochish</a>" if location_url else ""
     delivery_label = "Yandex dostavka" if data.get("delivery_method") == "yandex" else "Pochta"
 
     summary = (
@@ -129,7 +103,7 @@ async def send_order_summary(message: Message, state: FSMContext, address: str, 
         f"👤 {data.get('customer_name')}\n"
         f"📱 {data.get('customer_phone')}\n"
         f"🚚 {delivery_label}\n"
-        f"📍 {address}{location_line}\n"
+        f"📍 {address}\n"
         f"{'─' * 28}\n"
         f"{cart_text}\n"
         f"{'─' * 28}\n"
