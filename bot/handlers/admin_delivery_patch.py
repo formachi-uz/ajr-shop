@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from bot.middlewares.admin_check import is_admin
 from database.db import AsyncSessionLocal
-from database.models import Order, OrderStatus
+from database.models import Order, OrderItem, OrderStatus
 from database.crud import update_order_status, get_order_with_items
 
 router = Router()
@@ -50,7 +50,10 @@ async def send_confirmed_orders(message: Message):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Order)
-            .options(selectinload(Order.user), selectinload(Order.items).selectinload(getattr(Order.items.property.mapper.class_, "product")))
+            .options(
+                selectinload(Order.user),
+                selectinload(Order.items).selectinload(OrderItem.product),
+            )
             .where(Order.status == OrderStatus.CONFIRMED)
             .order_by(Order.created_at.desc())
         )
