@@ -9,8 +9,6 @@ from database.models import (
 )
 
 
-# ─── SIZE ORDER ───────────────────────────────────────────────────────────────
-
 SIZE_ORDER = {
     "XS": 1, "S": 2, "M": 3, "L": 4, "XL": 5, "XXL": 6, "3XL": 7,
     "36": 10, "37": 11, "38": 12, "39": 13, "40": 14,
@@ -36,17 +34,7 @@ def _status_value(status) -> str:
     return str(status or CustomizationStatus.NOT_AVAILABLE.value).lower()
 
 
-def _normalize_product_payload(kwargs: dict) -> dict:
-    category_id = int(kwargs.get("category_id") or 0)
-    kwargs.setdefault("main_category", MAIN_CATEGORY_BY_CATEGORY_ID.get(category_id))
-    kwargs.setdefault("product_type", PRODUCT_TYPE_BY_CATEGORY_ID.get(category_id))
-
-    if "customization_status" not in kwargs:
-        kwargs["customization_status"] = (
-            CustomizationStatus.AVAILABLE_PAID.value if category_id == 1 else CustomizationStatus.NOT_AVAILABLE.value
-        )
-
-    status = _status_value(kwargs.get("customization_status"))
+def _normalize_customization_status(status) -> str:
     status_map = {
         "paid": CustomizationStatus.AVAILABLE_PAID.value,
         "available_paid": CustomizationStatus.AVAILABLE_PAID.value,
@@ -57,12 +45,31 @@ def _normalize_product_payload(kwargs: dict) -> dict:
         "none": CustomizationStatus.NOT_AVAILABLE.value,
         "not_available": CustomizationStatus.NOT_AVAILABLE.value,
     }
-    kwargs["customization_status"] = status_map.get(status, CustomizationStatus.NOT_AVAILABLE.value)
-    kwargs.setdefault("customization_price", 50000.0)
-    kwargs["is_customizable"] = kwargs["customization_status"] in {
-        CustomizationStatus.AVAILABLE_PAID.value,
-        CustomizationStatus.INCLUDED_BONUS.value,
-    }
+    return status_map.get(_status_value(status), CustomizationStatus.NOT_AVAILABLE.value)
+
+
+def _normalize_product_payload(kwargs: dict) -> dict:
+    """Normalize product payload without wiping fields that are not being edited."""
+    has_category = "category_id" in kwargs
+    category_id = int(kwargs.get("category_id") or 0) if has_category else None
+
+    if has_category:
+        kwargs.setdefault("main_category", MAIN_CATEGORY_BY_CATEGORY_ID.get(category_id))
+        kwargs.setdefault("product_type", PRODUCT_TYPE_BY_CATEGORY_ID.get(category_id))
+
+    if "customization_status" in kwargs:
+        kwargs["customization_status"] = _normalize_customization_status(kwargs.get("customization_status"))
+    elif has_category:
+        kwargs["customization_status"] = (
+            CustomizationStatus.AVAILABLE_PAID.value if category_id == 1 else CustomizationStatus.NOT_AVAILABLE.value
+        )
+
+    if "customization_status" in kwargs:
+        kwargs.setdefault("customization_price", 50000.0)
+        kwargs["is_customizable"] = kwargs["customization_status"] in {
+            CustomizationStatus.AVAILABLE_PAID.value,
+            CustomizationStatus.INCLUDED_BONUS.value,
+        }
     return kwargs
 
 
@@ -82,17 +89,13 @@ async def _safe_schedule_job(job_type: str, delay_seconds: int, user_telegram_id
         print(f"Scheduled job skipped: {exc}")
 
 
-# ─── USER ─────────────────────────────────────────────────────────────────────
-
 async def get_or_create_user(
     session: AsyncSession,
     telegram_id: int,
     full_name: str,
     username: str = None
 ) -> User:
-    result = await session.execute(
-        select(User).where(User.telegram_id == telegram_id)
-    )
+    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
     if not user:
         user = User(telegram_id=telegram_id, full_name=full_name, username=username)
@@ -103,34 +106,24 @@ async def get_or_create_user(
 
 
 async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> User | None:
-    result = await session.execute(
-        select(User).where(User.telegram_id == telegram_id)
-    )
+    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     return result.scalar_one_or_none()
 
 
 async def update_user_phone(session: AsyncSession, telegram_id: int, phone: str):
-    await session.execute(
-        update(User).where(User.telegram_id == telegram_id).values(phone=phone)
-    )
+    await session.execute(update(User).where(User.telegram_id == telegram_id).values(phone=phone))
     await session.commit()
 
 
-# ─── CATEGORY ─────────────────────────────────────────────────────────────────
-
 async def get_all_categories(session: AsyncSession) -> list[Category]:
     result = await session.execute(
-        select(Category)
-        .where(Category.is_active == True)
-        .order_by(Category.sort_order)
+        select(Category).where(Category.is_active == True).order_by(Category.sort_order)
     )
     return list(result.scalars().all())
 
 
 async def get_category_by_id(session: AsyncSession, category_id: int) -> Category | None:
-    result = await session.execute(
-        select(Category).where(Category.id == category_id)
-    )
+    result = await session.execute(select(Category).where(Category.id == category_id))
     return result.scalar_one_or_none()
 
 
@@ -147,8 +140,6 @@ async def create_category(
     await session.refresh(cat)
     return cat
 
-
-# ─── PRODUCT ──────────────────────────────────────────────────────────────────
 
 async def get_all_products(session: AsyncSession) -> list[Product]:
     result = await session.execute(
@@ -173,11 +164,7 @@ async def get_products_by_category(session: AsyncSession, category_id: int) -> l
 async def get_product_by_id(session: AsyncSession, product_id: int) -> Product | None:
     result = await session.execute(
         select(Product)
-        .options(
-            selectinload(Product.stocks),
-            selectinload(Product.reviews),
-            selectinload(Product.category)
-        )
+        .options(selectinload(Product.stocks), selectinload(Product.reviews), selectinload(Product.category))
         .where(Product.id == product_id)
     )
     return result.scalar_one_or_none()
@@ -195,24 +182,17 @@ async def create_product(session: AsyncSession, **kwargs) -> Product:
 async def update_product(session: AsyncSession, product_id: int, **kwargs):
     if "category_id" in kwargs or "customization_status" in kwargs:
         kwargs = _normalize_product_payload(kwargs)
-    await session.execute(
-        update(Product).where(Product.id == product_id).values(**kwargs)
-    )
+    await session.execute(update(Product).where(Product.id == product_id).values(**kwargs))
     await session.commit()
 
 
 async def delete_product(session: AsyncSession, product_id: int):
-    """Soft delete"""
     await update_product(session, product_id, is_active=False)
 
 
-# ─── STOCK ────────────────────────────────────────────────────────────────────
-
 async def get_product_stocks(session: AsyncSession, product_id: int) -> list[ProductStock]:
     result = await session.execute(
-        select(ProductStock)
-        .where(ProductStock.product_id == product_id)
-        .order_by(ProductStock.sort_order)
+        select(ProductStock).where(ProductStock.product_id == product_id).order_by(ProductStock.sort_order)
     )
     return list(result.scalars().all())
 
@@ -224,10 +204,7 @@ async def set_product_stock(
     quantity: int
 ) -> ProductStock:
     result = await session.execute(
-        select(ProductStock).where(
-            ProductStock.product_id == product_id,
-            ProductStock.size == size
-        )
+        select(ProductStock).where(ProductStock.product_id == product_id, ProductStock.size == size)
     )
     stock = result.scalar_one_or_none()
     sort_order = SIZE_ORDER.get(size.upper(), 99)
@@ -236,12 +213,7 @@ async def set_product_stock(
         stock.quantity = quantity
         stock.sort_order = sort_order
     else:
-        stock = ProductStock(
-            product_id=product_id,
-            size=size,
-            quantity=quantity,
-            sort_order=sort_order
-        )
+        stock = ProductStock(product_id=product_id, size=size, quantity=quantity, sort_order=sort_order)
         session.add(stock)
     await session.commit()
     return stock
@@ -253,15 +225,8 @@ async def decrease_stock(
     size: str,
     qty: int = 1
 ) -> bool:
-    """
-    Admin buyurtmani tasdiqlaganda chaqiriladi.
-    True = muvaffaqiyatli, False = yetarli zaxira yo'q.
-    """
     result = await session.execute(
-        select(ProductStock).where(
-            ProductStock.product_id == product_id,
-            ProductStock.size == size
-        )
+        select(ProductStock).where(ProductStock.product_id == product_id, ProductStock.size == size)
     )
     stock = result.scalar_one_or_none()
     if not stock or stock.quantity < qty:
@@ -277,17 +242,11 @@ async def reserve_stock(
     size: str,
     qty: int = 1
 ) -> bool:
-    """Buyurtma yaratilganda vaqtinchalik zaxiralash"""
     result = await session.execute(
-        select(ProductStock).where(
-            ProductStock.product_id == product_id,
-            ProductStock.size == size
-        )
+        select(ProductStock).where(ProductStock.product_id == product_id, ProductStock.size == size)
     )
     stock = result.scalar_one_or_none()
-    if not stock:
-        return False
-    if stock.available < qty:
+    if not stock or stock.available < qty:
         return False
     stock.reserved += qty
     await session.commit()
@@ -300,12 +259,8 @@ async def release_stock(
     size: str,
     qty: int = 1
 ):
-    """Buyurtma bekor qilinganda zaxirani qaytarish"""
     result = await session.execute(
-        select(ProductStock).where(
-            ProductStock.product_id == product_id,
-            ProductStock.size == size
-        )
+        select(ProductStock).where(ProductStock.product_id == product_id, ProductStock.size == size)
     )
     stock = result.scalar_one_or_none()
     if stock:
@@ -313,10 +268,7 @@ async def release_stock(
         await session.commit()
 
 
-async def get_low_stock_products(
-    session: AsyncSession,
-    threshold: int = 2
-) -> list[ProductStock]:
+async def get_low_stock_products(session: AsyncSession, threshold: int = 2) -> list[ProductStock]:
     result = await session.execute(
         select(ProductStock)
         .options(selectinload(ProductStock.product))
@@ -340,8 +292,6 @@ async def get_stock_report(session: AsyncSession) -> list[ProductStock]:
     )
     return list(result.scalars().all())
 
-
-# ─── ORDER ────────────────────────────────────────────────────────────────────
 
 async def create_order(
     session: AsyncSession,
@@ -397,17 +347,11 @@ async def add_order_item(
 
 
 async def update_order_total(session: AsyncSession, order_id: int, total: float):
-    await session.execute(
-        update(Order).where(Order.id == order_id).values(total_price=total)
-    )
+    await session.execute(update(Order).where(Order.id == order_id).values(total_price=total))
     await session.commit()
 
 
-async def update_order_status(
-    session: AsyncSession,
-    order_id: int,
-    status: str
-):
+async def update_order_status(session: AsyncSession, order_id: int, status: str):
     order = await get_order_with_items(session, order_id)
     if not order:
         return
@@ -415,24 +359,18 @@ async def update_order_status(
     previous_status = order.status
     new_status = OrderStatus(status)
 
-    await session.execute(
-        update(Order).where(Order.id == order_id).values(status=new_status)
-    )
+    await session.execute(update(Order).where(Order.id == order_id).values(status=new_status))
 
-    # Stock: faqat admin TASDIQLASH bosganida kamaytirish
     if previous_status == OrderStatus.PENDING and new_status == OrderStatus.CONFIRMED:
         for item in (order.items or []):
             if item.size:
-                # Avval zaxirani bo'shat, keyin haqiqiy kamayt
                 await release_stock(session, item.product_id, item.size, item.quantity)
                 await decrease_stock(session, item.product_id, item.size, item.quantity)
 
-    # Bekor qilinganda: zaxirani qaytarish
-    if new_status == OrderStatus.CANCELLED:
-        if previous_status == OrderStatus.PENDING:
-            for item in (order.items or []):
-                if item.size:
-                    await release_stock(session, item.product_id, item.size, item.quantity)
+    if new_status == OrderStatus.CANCELLED and previous_status == OrderStatus.PENDING:
+        for item in (order.items or []):
+            if item.size:
+                await release_stock(session, item.product_id, item.size, item.quantity)
 
     await session.commit()
 
@@ -448,10 +386,7 @@ async def update_order_status(
 async def get_order_with_items(session: AsyncSession, order_id: int) -> Order | None:
     result = await session.execute(
         select(Order)
-        .options(
-            selectinload(Order.items).selectinload(OrderItem.product),
-            selectinload(Order.user)
-        )
+        .options(selectinload(Order.items).selectinload(OrderItem.product), selectinload(Order.user))
         .where(Order.id == order_id)
     )
     return result.scalar_one_or_none()
@@ -487,13 +422,7 @@ async def get_orders_by_status(session: AsyncSession, status: str) -> list[Order
     return list(result.scalars().all())
 
 
-# ─── REVIEW ───────────────────────────────────────────────────────────────────
-
-async def get_reviews(
-    session: AsyncSession,
-    product_id: int = None,
-    limit: int = 20
-) -> list[Review]:
+async def get_reviews(session: AsyncSession, product_id: int = None, limit: int = 20) -> list[Review]:
     query = (
         select(Review)
         .options(selectinload(Review.user), selectinload(Review.product))
