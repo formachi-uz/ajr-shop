@@ -30,6 +30,7 @@ from bot.handlers import (
     admin_tools_patch,
     admin_status_patch,
     admin_reset_patch,
+    automation_patch,
     admin,
     review,
 )
@@ -58,6 +59,8 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
 
+    automation_patch.start_background_jobs(bot)
+
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(AdminMiddleware())
 
@@ -74,6 +77,7 @@ async def main():
     dp.include_router(admin_tools_patch.router)
     dp.include_router(admin_status_patch.router)
     dp.include_router(admin_reset_patch.router)
+    dp.include_router(automation_patch.router)
     dp.include_router(admin.router)
     dp.include_router(review.router)
 
