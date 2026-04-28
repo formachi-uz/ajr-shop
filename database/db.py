@@ -54,6 +54,32 @@ async def ensure_runtime_schema(conn):
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
         "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS player_name VARCHAR(100)",
         "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS back_print VARCHAR(100)",
+        """
+        CREATE TABLE IF NOT EXISTS scheduled_jobs (
+            id SERIAL PRIMARY KEY,
+            job_type VARCHAR(80) NOT NULL,
+            user_telegram_id BIGINT,
+            order_id INTEGER,
+            payload TEXT,
+            due_at TIMESTAMPTZ NOT NULL,
+            status VARCHAR(20) DEFAULT 'pending',
+            attempts INTEGER DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            processed_at TIMESTAMPTZ
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS order_events (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER NOT NULL,
+            event_type VARCHAR(80) NOT NULL,
+            event_text TEXT,
+            actor_telegram_id BIGINT,
+            created_at TIMESTAMPTZ DEFAULT now()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_scheduled_jobs_due ON scheduled_jobs(status, due_at)",
+        "CREATE INDEX IF NOT EXISTS ix_order_events_order ON order_events(order_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_products_team ON products(team)",
         "CREATE INDEX IF NOT EXISTS ix_products_brand ON products(brand)",
         "CREATE INDEX IF NOT EXISTS ix_products_main_category ON products(main_category)",
