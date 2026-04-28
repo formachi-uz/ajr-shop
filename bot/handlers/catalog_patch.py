@@ -1,12 +1,18 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from database.db import AsyncSessionLocal
 from database.crud import get_all_categories, get_category_by_id
 from database.models import Product, ProductStock
 
 router = Router()
+
+MAIN_CATEGORY_BY_ID = {
+    1: "FORMLAR",
+    2: "RETRO_FORMALAR",
+    3: "BUTSIYLAR",
+}
 
 
 def categories_kb(categories) -> InlineKeyboardMarkup:
@@ -37,14 +43,27 @@ def products_kb(products_with_stocks: list, category_id: int) -> InlineKeyboardM
                 callback_data=f"prod_{product.id}",
             )
         ])
-    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="catalog")])
+    rows.append([InlineKeyboardButton(text="⬅️ Katalogga qaytish", callback_data="catalog")])
+    rows.append([InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def empty_category_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Katalogga qaytish", callback_data="catalog")],
+        [InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="main_menu")],
+    ])
+
+
 async def load_products_with_stocks(session, category_id: int):
+    category_filter = Product.category_id == category_id
+    main_category = MAIN_CATEGORY_BY_ID.get(category_id)
+    if main_category:
+        category_filter = or_(Product.category_id == category_id, Product.main_category == main_category)
+
     result = await session.execute(
         select(Product)
-        .where(Product.category_id == category_id, Product.is_active == True)
+        .where(category_filter, Product.is_active == True)
         .order_by(Product.id.desc())
     )
     products = list(result.scalars().all())
@@ -75,19 +94,19 @@ async def catalog_callback(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cat_"))
 async def category_callback(callback: CallbackQuery):
+    await callback.answer()
     try:
         category_id = int(callback.data.split("_", 1)[1])
     except (ValueError, IndexError):
-        await callback.answer("Kategoriya xatosi", show_alert=True)
+        await callback.message.answer("⚠️ Kategoriya xatosi. Katalogni qaytadan oching.")
         return
 
     async with AsyncSessionLocal() as session:
         category = await get_category_by_id(session, category_id)
         if not category:
-            await callback.answer("Kategoriya topilmadi", show_alert=True)
+            await callback.message.answer("⚠️ Kategoriya topilmadi. Katalogni qaytadan oching.")
             return
         products_with_stocks = await load_products_with_stocks(session, category_id)
-        categories = await get_all_categories(session)
 
     if not products_with_stocks:
         empty_text = (
@@ -96,10 +115,9 @@ async def category_callback(callback: CallbackQuery):
             "Admin paneldan mahsulot qo'shganda aynan shu kategoriyani tanlang."
         )
         try:
-            await callback.message.edit_text(empty_text, parse_mode="HTML", reply_markup=categories_kb(categories))
+            await callback.message.edit_text(empty_text, parse_mode="HTML", reply_markup=empty_category_kb())
         except Exception:
-            await callback.message.answer(empty_text, parse_mode="HTML", reply_markup=categories_kb(categories))
-        await callback.answer("Bu kategoriyada mahsulot yo'q")
+            await callback.message.answer(empty_text, parse_mode="HTML", reply_markup=empty_category_kb())
         return
 
     text = f"{category.emoji} <b>{category.name}</b>\n"
@@ -119,4 +137,3 @@ async def category_callback(callback: CallbackQuery):
             parse_mode="HTML",
             reply_markup=products_kb(products_with_stocks, category_id),
         )
-    await callback.answer()
