@@ -5,12 +5,12 @@ def admin_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="✅ Tasdiqlangan buyurtmalar"), KeyboardButton(text="📋 Yangi buyurtmalar")],
+            [KeyboardButton(text="🚚 Yetkazilayotgan"), KeyboardButton(text="📊 Statistika")],
             [KeyboardButton(text="➕ Mahsulot qo'shish"), KeyboardButton(text="📦 Mahsulotlar")],
             [KeyboardButton(text="🔎 Mahsulot qidirish"), KeyboardButton(text="📦 Stock boshqarish")],
             [KeyboardButton(text="🚕 Toshkent/Yandex"), KeyboardButton(text="📉 Kam qolgan stock")],
-            [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📢 Xabar yuborish")],
-            [KeyboardButton(text="👥 Adminlar"), KeyboardButton(text="🌐 Web Panel")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
+            [KeyboardButton(text="📢 Xabar yuborish"), KeyboardButton(text="🌐 Web Panel")],
+            [KeyboardButton(text="👥 Adminlar"), KeyboardButton(text="🏠 Asosiy menyu")],
         ],
         resize_keyboard=True
     )
