@@ -9,11 +9,12 @@ from bot.handlers.admin_delivery_patch import is_yandex_order
 from bot.keyboards.admin_kb import admin_menu_kb
 from bot.middlewares.admin_check import is_admin
 from database.db import AsyncSessionLocal
-from database.models import Order, OrderItem, OrderStatus, User
+from database.models import Order, OrderItem, OrderStatus, PaymentType, User
 
 router = Router()
 TRACK_PREFIX = "[FORMACHI_TRACK]"
 ADMIN_NOTE_PREFIX = "[FORMACHI_ADMIN_NOTE]"
+PAYNET_LINK = "https://app.paynet.uz/qr-online/00020101021140440012qr-online.uz01186r0C2GWSuXEb8UE7KQ0202115204531153038605802UZ5910AO'PAYNET'6008Tashkent610610002164280002uz0106PAYNET0208Toshkent80520012qr-online.uz03097120207070419marketing@paynet.uz6304A3D2"
 
 
 class OrderSearchState(StatesGroup):
@@ -35,6 +36,7 @@ def order_tools_kb(order) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"admin_confirm_{order.id}"),
             InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"admin_cancel_{order.id}"),
         ])
+        rows.append([InlineKeyboardButton(text="🔔 Chek eslatish", callback_data=f"admin_remind_payment_{order.id}")])
     elif order.status == OrderStatus.CONFIRMED:
         rows.append([
             InlineKeyboardButton(
@@ -42,11 +44,15 @@ def order_tools_kb(order) -> InlineKeyboardMarkup:
                 callback_data=f"admin_deliver_{order.id}",
             )
         ])
+        rows.append([InlineKeyboardButton(text="📩 Statusni yuborish", callback_data=f"admin_resend_status_{order.id}")])
     elif order.status == OrderStatus.DELIVERING:
         rows.append([
             InlineKeyboardButton(text="🏷 Trek raqam", callback_data=f"admin_track_{order.id}"),
             InlineKeyboardButton(text="✔️ Yetkazildi", callback_data=f"admin_done_{order.id}"),
         ])
+        rows.append([InlineKeyboardButton(text="📩 Statusni yuborish", callback_data=f"admin_resend_status_{order.id}")])
+    elif order.status == OrderStatus.DONE:
+        rows.append([InlineKeyboardButton(text="📩 Rahmat xabarini yuborish", callback_data=f"admin_resend_status_{order.id}")])
     rows.append([InlineKeyboardButton(text="📝 Admin izoh", callback_data=f"admin_note_{order.id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -98,6 +104,50 @@ async def handle_order_search(message: Message, state: FSMContext):
         await message.answer(format_order_admin(order), parse_mode="HTML", reply_markup=order_tools_kb(order), disable_web_page_preview=True)
 
 
+@router.callback_query(F.data.startswith("admin_remind_payment_"))
+async def remind_payment(callback: CallbackQuery, bot: Bot):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Ruxsat yo'q", show_alert=True)
+        return
+    order_id = int(callback.data.split("_")[3])
+    async with AsyncSessionLocal() as session:
+        order = await get_order(session, order_id)
+    if not order or not order.user:
+        await callback.answer("Order yoki mijoz topilmadi", show_alert=True)
+        return
+
+    try:
+        await bot.send_message(order.user.telegram_id, payment_reminder_text(order), parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as exc:
+        await callback.message.answer(f"❌ Eslatma yuborilmadi: <code>{type(exc).__name__}: {str(exc)[:400]}</code>", parse_mode="HTML")
+        await callback.answer()
+        return
+    await callback.message.answer(f"🔔 Buyurtma #{order_id} bo'yicha eslatma mijozga yuborildi.")
+    await callback.answer("Eslatma yuborildi")
+
+
+@router.callback_query(F.data.startswith("admin_resend_status_"))
+async def resend_status(callback: CallbackQuery, bot: Bot):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Ruxsat yo'q", show_alert=True)
+        return
+    order_id = int(callback.data.split("_")[3])
+    async with AsyncSessionLocal() as session:
+        order = await get_order(session, order_id)
+    if not order or not order.user:
+        await callback.answer("Order yoki mijoz topilmadi", show_alert=True)
+        return
+
+    try:
+        await bot.send_message(order.user.telegram_id, status_message_text(order), parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as exc:
+        await callback.message.answer(f"❌ Status yuborilmadi: <code>{type(exc).__name__}: {str(exc)[:400]}</code>", parse_mode="HTML")
+        await callback.answer()
+        return
+    await callback.message.answer(f"📩 Buyurtma #{order_id} statusi mijozga yuborildi.")
+    await callback.answer("Status yuborildi")
+
+
 @router.callback_query(F.data.startswith("admin_track_"))
 async def start_track_code(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -146,12 +196,7 @@ async def save_track_code(message: Message, state: FSMContext, bot: Bot):
 
     if order.user:
         try:
-            await bot.send_message(
-                order.user.telegram_id,
-                f"🏷 <b>Buyurtma #{order_id} trek raqami:</b>\n<code>{code}</code>\n\n"
-                "Yetkazib berish holatini shu kod orqali tekshirishingiz mumkin.",
-                parse_mode="HTML",
-            )
+            await bot.send_message(order.user.telegram_id, status_message_text(order), parse_mode="HTML", disable_web_page_preview=True)
         except Exception as exc:
             await message.answer(f"⚠️ Mijozga xabar borishda xato: <code>{type(exc).__name__}</code>", parse_mode="HTML")
 
@@ -276,6 +321,48 @@ def status_label(order) -> str:
         OrderStatus.CANCELLED: "❌ BEKOR",
     }
     return labels.get(order.status, order.status.value if order.status else "—")
+
+
+def payment_reminder_text(order) -> str:
+    pay_type = order.payment_type.value if order.payment_type else ""
+    base = (
+        f"🔔 <b>Buyurtma #{order.id} bo'yicha eslatma</b>\n\n"
+        f"Summa: <b>{int(order.total_price or 0):,} so'm</b>\n"
+    )
+    if pay_type == PaymentType.CARD.value:
+        return (
+            base
+            + "To'lovni Paynet orqali amalga oshirib, chek rasmini botga yuboring.\n\n"
+            + f"Paynet link: {PAYNET_LINK}\n\n"
+            + "To'lovni amalga oshirgach, chekni yuborishni unutmang."
+        )
+    if pay_type == PaymentType.CREDIT.value:
+        return base + "Uzum Nasiya bo'yicha arizangiz adminga yuborilgan. Tez orada siz bilan bog'lanamiz."
+    return base + "Buyurtmani yakunlash uchun admin bilan bog'laning: @formachi_admin"
+
+
+def status_message_text(order) -> str:
+    track = read_meta_line(order.comment, TRACK_PREFIX)
+    if order.status == OrderStatus.CONFIRMED:
+        return (
+            f"✅ <b>Buyurtma #{order.id} tasdiqlandi!</b>\n\n"
+            "Buyurtmangiz tayyorlanmoqda. Tez orada yetkazib berishga topshiriladi."
+        )
+    if order.status == OrderStatus.DELIVERING:
+        delivery = "Yandex dostavkaga" if is_yandex_order(order) else "pochtaga"
+        text = f"🚚 <b>Buyurtma #{order.id} {delivery} topshirildi!</b>\n\n"
+        if track:
+            text += f"🏷 Trek raqam: <code>{track}</code>\n\n"
+        text += "Telefoningiz yoqilgan bo'lsin."
+        return text
+    if order.status == OrderStatus.DONE:
+        return (
+            f"✔️ <b>Buyurtma #{order.id} yetkazildi!</b>\n\n"
+            "FORMACHI bilan xarid qilganingiz uchun rahmat."
+        )
+    if order.status == OrderStatus.CANCELLED:
+        return f"❌ <b>Buyurtma #{order.id} bekor qilindi.</b>\n\nSavollar uchun @formachi_admin ga yozing."
+    return payment_reminder_text(order)
 
 
 def format_order_admin(order) -> str:
