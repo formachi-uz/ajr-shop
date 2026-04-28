@@ -6,6 +6,9 @@ def admin_menu_kb() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="✅ Tasdiqlangan buyurtmalar"), KeyboardButton(text="📋 Yangi buyurtmalar")],
             [KeyboardButton(text="➕ Mahsulot qo'shish"), KeyboardButton(text="📦 Mahsulotlar")],
+            [KeyboardButton(text="🔎 Mahsulot qidirish"), KeyboardButton(text="📦 Stock boshqarish")],
+            [KeyboardButton(text="🚕 Toshkent/Yandex"), KeyboardButton(text="📉 Kam qolgan stock")],
+            [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📢 Xabar yuborish")],
             [KeyboardButton(text="👥 Adminlar"), KeyboardButton(text="🌐 Web Panel")],
             [KeyboardButton(text="🏠 Asosiy menyu")],
         ],
@@ -14,11 +17,6 @@ def admin_menu_kb() -> ReplyKeyboardMarkup:
 
 
 def order_actions_kb(order_id: int) -> InlineKeyboardMarkup:
-    """
-    Guruhga keladigan yangi buyurtma tugmalari.
-    1-BOSQICH: Faqat Tasdiqlash yoki Bekor qilish.
-    Bosilgandan keyin tugmalar yo'qoladi (1 martalik).
-    """
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"admin_confirm_{order_id}"),
@@ -28,11 +26,6 @@ def order_actions_kb(order_id: int) -> InlineKeyboardMarkup:
 
 
 def check_confirm_kb(order_id: int) -> InlineKeyboardMarkup:
-    """
-    Chek guruhiga keladigan tugma.
-    Admin chekni ko'rib: "To'lov tasdiqlandi" bosadi.
-    1 martalik.
-    """
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
@@ -50,10 +43,6 @@ def check_confirm_kb(order_id: int) -> InlineKeyboardMarkup:
 
 
 def postal_kb(order_id: int) -> InlineKeyboardMarkup:
-    """
-    Tasdiqlangan buyurtmalar ro'yxatida.
-    Admin pochtaga topshirganda bosadi — 1 martalik.
-    """
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
