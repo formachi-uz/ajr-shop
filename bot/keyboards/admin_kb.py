@@ -10,7 +10,8 @@ def admin_menu_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="🔎 Mahsulot qidirish"), KeyboardButton(text="📦 Stock boshqarish")],
             [KeyboardButton(text="🚕 Toshkent/Yandex"), KeyboardButton(text="📉 Kam qolgan stock")],
             [KeyboardButton(text="📢 Xabar yuborish"), KeyboardButton(text="🌐 Web Panel")],
-            [KeyboardButton(text="👥 Adminlar"), KeyboardButton(text="🏠 Asosiy menyu")],
+            [KeyboardButton(text="👥 Adminlar"), KeyboardButton(text="🧹 Bazani tozalash")],
+            [KeyboardButton(text="🏠 Asosiy menyu")],
         ],
         resize_keyboard=True
     )
