@@ -10,6 +10,7 @@ from bot.handlers import admin
 from bot.keyboards.admin_kb import admin_menu_kb
 from database.db import AsyncSessionLocal
 from database.crud import create_product, set_product_stock
+from database.models import CustomizationStatus
 
 router = Router()
 
@@ -41,9 +42,24 @@ PRODUCT_TYPE_BY_ID = {
 }
 
 CUSTOMIZATION_BY_ID = {
-    1: "available_paid",
-    2: "not_available",
-    3: "not_available",
+    1: CustomizationStatus.AVAILABLE_PAID,
+    2: CustomizationStatus.NOT_AVAILABLE,
+    3: CustomizationStatus.NOT_AVAILABLE,
+}
+
+CUSTOMIZATION_ALIASES = {
+    "paid": CustomizationStatus.AVAILABLE_PAID,
+    "available_paid": CustomizationStatus.AVAILABLE_PAID,
+    "pullik": CustomizationStatus.AVAILABLE_PAID,
+    "ha": CustomizationStatus.AVAILABLE_PAID,
+    "bonus": CustomizationStatus.INCLUDED_BONUS,
+    "included_bonus": CustomizationStatus.INCLUDED_BONUS,
+    "bepul": CustomizationStatus.INCLUDED_BONUS,
+    "no": CustomizationStatus.NOT_AVAILABLE,
+    "none": CustomizationStatus.NOT_AVAILABLE,
+    "not_available": CustomizationStatus.NOT_AVAILABLE,
+    "yoq": CustomizationStatus.NOT_AVAILABLE,
+    "yo'q": CustomizationStatus.NOT_AVAILABLE,
 }
 
 
@@ -54,7 +70,6 @@ class GalleryState(StatesGroup):
 
 @router.message(admin.AddProductState.photo)
 async def collect_main_product_photo(message: Message, state: FSMContext):
-    """Collect the main image, then allow optional gallery images."""
     photo_url = None
     if message.photo:
         photo_url = message.photo[-1].file_id
@@ -174,7 +189,6 @@ async def accept_and_save_stock_message(message: Message, state: FSMContext):
     data = await state.get_data()
     data["stocks"] = parsed
 
-    # Clear immediately so the next admin command is never swallowed as another stock message.
     await state.clear()
     await message.answer("✅ O'lchamlar qabul qilindi, mahsulot saqlanyapti...")
 
@@ -215,7 +229,9 @@ async def save_product_from_data(message: Message, data: dict, stocks: dict[str,
         brand=data.get("brand"),
         model=data.get("model"),
         tags=data.get("tags"),
-        customization_status=data.get("customization_status") or CUSTOMIZATION_BY_ID.get(category_id, "not_available"),
+        customization_status=normalize_customization_status(
+            data.get("customization_status") or CUSTOMIZATION_BY_ID.get(category_id)
+        ),
         customization_price=data.get("customization_price", 50000),
         is_featured=bool(data.get("is_featured", False)),
         is_top_forma=bool(data.get("is_top_forma", False)),
@@ -235,7 +251,6 @@ async def save_product_from_data(message: Message, data: dict, stocks: dict[str,
         try:
             product = await create_product(session, **product_kwargs)
         except TypeError:
-            # Older runtime/model without new metadata support: save the product, then keep bot usable.
             for key in (
                 "gallery",
                 "main_category",
@@ -275,6 +290,12 @@ async def save_product_from_data(message: Message, data: dict, stocks: dict[str,
         parse_mode="HTML",
         reply_markup=admin_menu_kb(),
     )
+
+
+def normalize_customization_status(value):
+    if isinstance(value, CustomizationStatus):
+        return value
+    return CUSTOMIZATION_ALIASES.get(str(value or "").strip().lower(), CustomizationStatus.NOT_AVAILABLE)
 
 
 def parse_stock_text(value: str) -> dict[str, int]:
