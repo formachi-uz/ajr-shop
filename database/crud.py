@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, text
 from sqlalchemy.orm import selectinload
 
 from database.models import (
@@ -16,6 +16,70 @@ SIZE_ORDER = {
     "36": 10, "37": 11, "38": 12, "39": 13, "40": 14,
     "41": 15, "42": 16, "43": 17, "44": 18, "45": 19,
 }
+
+MAIN_CATEGORY_BY_CATEGORY_ID = {
+    1: "FORMLAR",
+    2: "RETRO_FORMALAR",
+    3: "BUTSIYLAR",
+}
+
+PRODUCT_TYPE_BY_CATEGORY_ID = {
+    1: "jersey",
+    2: "retro_jersey",
+    3: "boots",
+}
+
+
+def _status_value(status) -> str:
+    if isinstance(status, CustomizationStatus):
+        return status.value
+    return str(status or CustomizationStatus.NOT_AVAILABLE.value).lower()
+
+
+def _normalize_product_payload(kwargs: dict) -> dict:
+    category_id = int(kwargs.get("category_id") or 0)
+    kwargs.setdefault("main_category", MAIN_CATEGORY_BY_CATEGORY_ID.get(category_id))
+    kwargs.setdefault("product_type", PRODUCT_TYPE_BY_CATEGORY_ID.get(category_id))
+
+    if "customization_status" not in kwargs:
+        kwargs["customization_status"] = (
+            CustomizationStatus.AVAILABLE_PAID.value if category_id == 1 else CustomizationStatus.NOT_AVAILABLE.value
+        )
+
+    status = _status_value(kwargs.get("customization_status"))
+    status_map = {
+        "paid": CustomizationStatus.AVAILABLE_PAID.value,
+        "available_paid": CustomizationStatus.AVAILABLE_PAID.value,
+        "bonus": CustomizationStatus.INCLUDED_BONUS.value,
+        "free": CustomizationStatus.INCLUDED_BONUS.value,
+        "included_bonus": CustomizationStatus.INCLUDED_BONUS.value,
+        "no": CustomizationStatus.NOT_AVAILABLE.value,
+        "none": CustomizationStatus.NOT_AVAILABLE.value,
+        "not_available": CustomizationStatus.NOT_AVAILABLE.value,
+    }
+    kwargs["customization_status"] = status_map.get(status, CustomizationStatus.NOT_AVAILABLE.value)
+    kwargs.setdefault("customization_price", 50000.0)
+    kwargs["is_customizable"] = kwargs["customization_status"] in {
+        CustomizationStatus.AVAILABLE_PAID.value,
+        CustomizationStatus.INCLUDED_BONUS.value,
+    }
+    return kwargs
+
+
+async def _safe_order_event(order_id: int, event_type: str, event_text: str, actor_telegram_id: int | None = None):
+    try:
+        from bot.handlers.automation_patch import add_order_event
+        await add_order_event(order_id, event_type, event_text, actor_telegram_id)
+    except Exception as exc:
+        print(f"Order event skipped: {exc}")
+
+
+async def _safe_schedule_job(job_type: str, delay_seconds: int, user_telegram_id: int | None, order_id: int):
+    try:
+        from bot.handlers.automation_patch import schedule_job
+        await schedule_job(job_type, delay_seconds, user_telegram_id=user_telegram_id, order_id=order_id)
+    except Exception as exc:
+        print(f"Scheduled job skipped: {exc}")
 
 
 # ─── USER ─────────────────────────────────────────────────────────────────────
@@ -120,14 +184,7 @@ async def get_product_by_id(session: AsyncSession, product_id: int) -> Product |
 
 
 async def create_product(session: AsyncSession, **kwargs) -> Product:
-    # is_customizable legacy sync
-    if "customization_status" in kwargs:
-        status = kwargs["customization_status"]
-        kwargs["is_customizable"] = status in (
-            CustomizationStatus.AVAILABLE_PAID,
-            CustomizationStatus.INCLUDED_BONUS,
-            "available_paid", "included_bonus"
-        )
+    kwargs = _normalize_product_payload(kwargs)
     product = Product(**kwargs)
     session.add(product)
     await session.commit()
@@ -136,14 +193,8 @@ async def create_product(session: AsyncSession, **kwargs) -> Product:
 
 
 async def update_product(session: AsyncSession, product_id: int, **kwargs):
-    # is_customizable legacy sync
-    if "customization_status" in kwargs:
-        status = kwargs["customization_status"]
-        kwargs["is_customizable"] = status in (
-            CustomizationStatus.AVAILABLE_PAID,
-            CustomizationStatus.INCLUDED_BONUS,
-            "available_paid", "included_bonus"
-        )
+    if "category_id" in kwargs or "customization_status" in kwargs:
+        kwargs = _normalize_product_payload(kwargs)
     await session.execute(
         update(Product).where(Product.id == product_id).values(**kwargs)
     )
@@ -313,6 +364,12 @@ async def create_order(
     session.add(order)
     await session.commit()
     await session.refresh(order)
+
+    result = await session.execute(select(User.telegram_id).where(User.id == user_id))
+    user_telegram_id = result.scalar_one_or_none()
+    await _safe_order_event(order.id, "created", "Buyurtma yaratildi")
+    if user_telegram_id:
+        await _safe_schedule_job("payment_reminder", 2 * 60 * 60, int(user_telegram_id), order.id)
     return order
 
 
@@ -378,6 +435,14 @@ async def update_order_status(
                     await release_stock(session, item.product_id, item.size, item.quantity)
 
     await session.commit()
+
+    await _safe_order_event(
+        order_id,
+        "status",
+        f"Status: {previous_status.value if previous_status else 'unknown'} -> {new_status.value}",
+    )
+    if new_status == OrderStatus.CONFIRMED and order.user:
+        await _safe_schedule_job("review_check", 2 * 24 * 60 * 60, order.user.telegram_id, order_id)
 
 
 async def get_order_with_items(session: AsyncSession, order_id: int) -> Order | None:
