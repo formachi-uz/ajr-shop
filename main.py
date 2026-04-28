@@ -22,6 +22,7 @@ from bot.handlers import (
     catalog,
     cart,
     order_delivery_patch,
+    order_live_patch,
     order,
     admin_gallery,
     receipt_patch,
@@ -33,6 +34,7 @@ from bot.handlers import (
     admin_reset_patch,
     automation_patch,
     admin_product_edit_patch,
+    admin_product_power_patch,
     admin_payment_patch,
     admin,
     review,
@@ -64,6 +66,7 @@ async def main():
 
     automation_patch.start_background_jobs(bot)
     admin_product_edit_patch.install_product_edit_hooks()
+    admin_product_power_patch.install_product_power_hooks()
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(AdminMiddleware())
@@ -73,6 +76,7 @@ async def main():
     dp.include_router(catalog.router)
     dp.include_router(cart.router)
     dp.include_router(order_delivery_patch.router)
+    dp.include_router(order_live_patch.router)
     dp.include_router(order.router)
     dp.include_router(admin_gallery.router)
     dp.include_router(receipt_patch.router)
@@ -84,6 +88,7 @@ async def main():
     dp.include_router(admin_reset_patch.router)
     dp.include_router(automation_patch.router)
     dp.include_router(admin_product_edit_patch.router)
+    dp.include_router(admin_product_power_patch.router)
     dp.include_router(admin_payment_patch.router)
     dp.include_router(admin.router)
     dp.include_router(review.router)
