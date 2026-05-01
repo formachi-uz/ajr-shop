@@ -16,6 +16,18 @@ from bot.handlers.admin_channel_import import (
 from bot.middlewares.admin_check import is_admin
 
 router = Router()
+DEFAULT_IMPORTED_STOCK_QTY = 10
+
+
+def normalize_imported_stocks(parsed: dict) -> dict:
+    stocks = parsed.get("stocks") or {}
+    if not stocks:
+        return parsed
+    parsed["stocks"] = {
+        size: max(int(qty or 0), DEFAULT_IMPORTED_STOCK_QTY)
+        for size, qty in stocks.items()
+    }
+    return parsed
 
 
 def looks_like_product_post(message: Message) -> bool:
@@ -56,7 +68,7 @@ async def auto_import_product_post(message: Message, state: FSMContext):
         return
 
     try:
-        parsed = parse_product_post(text)
+        parsed = normalize_imported_stocks(parse_product_post(text))
         if photo_id:
             parsed["photo_url"] = photo_id
         parsed["description"] = text or parsed["name"]
