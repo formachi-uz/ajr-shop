@@ -29,6 +29,7 @@ from bot.handlers import (
     receipt_patch,
     admin_delivery_patch,
     admin_menu_patch,
+    admin_channel_import_fix,
     admin_channel_import,
     admin_order_tools_patch,
     admin_tools_patch,
@@ -86,6 +87,7 @@ async def main():
     dp.include_router(receipt_patch.router)
     dp.include_router(admin_delivery_patch.router)
     dp.include_router(admin_menu_patch.router)
+    dp.include_router(admin_channel_import_fix.router)
     dp.include_router(admin_channel_import.router)
     dp.include_router(admin_order_tools_patch.router)
     dp.include_router(admin_tools_patch.router)
