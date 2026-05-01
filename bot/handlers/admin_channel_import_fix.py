@@ -1,8 +1,19 @@
+from html import escape
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot.handlers.admin_channel_import import ChannelImportState, importer_kb
+from bot.handlers.admin_channel_import import (
+    ChannelImportState,
+    RECENT_MEDIA_IMPORTS,
+    STOP_WORDS,
+    append_gallery_photo,
+    format_import_result,
+    importer_kb,
+    parse_product_post,
+    save_imported_product,
+)
 from bot.keyboards.admin_kb import admin_menu_kb
 from bot.middlewares.admin_check import is_admin
 
@@ -48,3 +59,57 @@ async def stop_channel_import_fixed(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.answer("✅ Kanaldan import tugatildi.", reply_markup=admin_menu_kb())
     await callback.answer("Tugatildi")
+
+
+@router.message(ChannelImportState.waiting_posts)
+async def import_forwarded_post_fixed(message: Message, state: FSMContext):
+    if not message.from_user or not is_admin(message.from_user.id):
+        return
+
+    text = (message.caption or message.text or "").strip()
+    if text.lower() in STOP_WORDS:
+        await state.clear()
+        await message.answer("✅ Kanaldan import tugatildi.", reply_markup=admin_menu_kb())
+        return
+
+    photo_id = message.photo[-1].file_id if message.photo else None
+    media_group_id = str(message.media_group_id or "")
+
+    if photo_id and media_group_id and not text:
+        product_id = RECENT_MEDIA_IMPORTS.get((message.from_user.id, media_group_id))
+        if product_id:
+            await append_gallery_photo(product_id, photo_id)
+            await message.answer(f"🖼 Album rasmi mahsulot ID {product_id} gallery qismiga qo'shildi.")
+        return
+
+    if not text:
+        await message.answer(
+            "⚠️ Bu postda caption matni topilmadi.\n"
+            "Iltimos, narx yozilgan rasm/captionli postni forward qiling.",
+            reply_markup=importer_kb(),
+        )
+        return
+
+    try:
+        parsed = parse_product_post(text)
+        if photo_id:
+            parsed["photo_url"] = photo_id
+        parsed["description"] = text or parsed["name"]
+        product_id = await save_imported_product(parsed)
+    except Exception as exc:
+        await message.answer(
+            "❌ Import qilinmadi.\n\n"
+            f"<code>{escape(type(exc).__name__)}: {escape(str(exc)[:900])}</code>",
+            parse_mode="HTML",
+            reply_markup=importer_kb(),
+        )
+        return
+
+    if media_group_id:
+        RECENT_MEDIA_IMPORTS[(message.from_user.id, media_group_id)] = product_id
+
+    await message.answer(
+        format_import_result(product_id, parsed),
+        parse_mode="HTML",
+        reply_markup=importer_kb(),
+    )
