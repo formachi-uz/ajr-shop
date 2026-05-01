@@ -7,12 +7,12 @@ from database.db import AsyncSessionLocal
 from database.crud import (
     get_user_by_telegram_id, get_product_by_id,
     create_order, add_order_item,
-    update_order_total, get_order_with_items, update_order_status
+    update_order_total, get_order_with_items, set_order_channel_message
 )
 from bot.handlers.cart import get_cart, clear_cart, format_cart_text
+from bot.handlers.order_channel import as_order_caption, format_order_channel_text, order_status_kb
 from bot.keyboards.main_menu import main_menu_kb, cancel_kb
-from bot.keyboards.admin_kb import order_actions_kb
-from bot.middlewares.admin_check import is_admin, ADMIN_IDS, GROUP_CHAT_ID
+from bot.middlewares.admin_check import is_admin
 
 router = Router()
 
@@ -68,7 +68,7 @@ class CheckState(StatesGroup):
     waiting_check_photo = State()
 
 
-# ─── Cancel ───────────────────────────────────────────────────────────────────
+# ─── Cancel ──────────────────────────────────────────────────────────────────
 @router.message(F.text == "❌ Bekor qilish")
 async def cancel_order_flow(message: Message, state: FSMContext):
     await state.clear()
@@ -76,7 +76,7 @@ async def cancel_order_flow(message: Message, state: FSMContext):
     await message.answer("❌ Bekor qilindi.", reply_markup=main_menu_kb(is_admin=admin))
 
 
-# ─── Step 1: Ism ─────────────────────────────────────────────────────────────
+# ─── Step 1: Ism ──────────────────────────────────────────────────────────────
 @router.message(OrderState.waiting_name)
 async def handle_name(message: Message, state: FSMContext):
     name = message.text.strip()
@@ -218,7 +218,9 @@ async def handle_payment(callback: CallbackQuery, state: FSMContext, bot: Bot):
             user_id=user.id,
             payment_type=payment_type,
             delivery_address=address,
-            comment=f"Ism: {customer_name} | Tel: {customer_phone}"
+            comment=f"Ism: {customer_name} | Tel: {customer_phone}",
+            customer_name=customer_name,
+            customer_phone=customer_phone,
         )
 
         total = 0
@@ -235,6 +237,7 @@ async def handle_payment(callback: CallbackQuery, state: FSMContext, bot: Bot):
             total += item["price"] * item["qty"]
 
         await update_order_total(session, order.id, total)
+        order_details = await get_order_with_items(session, order.id)
 
     cart_snapshot = list(cart)
     clear_cart(callback.from_user.id)
@@ -274,7 +277,6 @@ async def handle_payment(callback: CallbackQuery, state: FSMContext, bot: Bot):
                 InlineKeyboardButton(text="💳 Paynet orqali to'lash", url=PAYNET_LINK)
             ]])
         )
-        # Chek so'rash
         await state.set_state(CheckState.waiting_check_photo)
         await state.update_data(check_order_id=order.id)
         await callback.message.answer(
@@ -284,7 +286,6 @@ async def handle_payment(callback: CallbackQuery, state: FSMContext, bot: Bot):
             parse_mode="HTML"
         )
     else:
-        # Nasiya — faqat xabar, bot aralashmaydi
         await callback.message.answer(
             base_text + "\n\n🤝 <b>Uzum Nasiya</b>\n\n"
             "Buyurtmangiz qabul qilindi!\n"
@@ -294,29 +295,8 @@ async def handle_payment(callback: CallbackQuery, state: FSMContext, bot: Bot):
 
     await callback.answer()
 
-    # ─── Guruhga + Glavniy adminga xabar ─────────────────────────────────────
-    nasiya_note = "\n⚠️ <b>UZUM NASIYA — aloqaga chiqing!</b>" if payment_type == "credit" else ""
-    admin_text = (
-        f"🆕 <b>YANGI BUYURTMA #{order.id}</b>{nasiya_note}\n"
-        f"{'─' * 28}\n"
-        f"👤 {customer_name}"
-        f"{'  @' + callback.from_user.username if callback.from_user.username else ''}\n"
-        f"🆔 <code>{callback.from_user.id}</code>\n"
-        f"📱 {customer_phone}\n"
-        f"{'─' * 28}\n"
-        f"📍 {address}\n"
-        f"💳 {payment_label}\n"
-        f"{'─' * 28}\n"
-        f"{cart_lines}"
-        f"{'─' * 28}\n"
-        f"💰 <b>JAMI: {int(total):,} so'm</b>"
-    )
+    admin_text = format_order_channel_text(order_details or order)
 
-    # ─── Birinchi mahsulot rasmini caption bilan yuborish ─────────────────────
-    # Barcha ma'lumot 1 ta postda: RASM + CAPTION (admin_text + tugmalar)
-    # Telegram caption limiti 1024 belgi — agar uzun bo'lsa kesib qo'yamiz
-
-    # Birinchi mahsulot rasmini topamiz
     first_photo = None
     for item in cart_snapshot:
         async with AsyncSessionLocal() as session:
@@ -325,31 +305,37 @@ async def handle_payment(callback: CallbackQuery, state: FSMContext, bot: Bot):
             first_photo = product.photo_url
             break
 
-    # Caption 1024 belgidan oshmasligi kerak
-    caption = admin_text
-    if len(caption) > 1024:
-        caption = caption[:1020] + "..."
-
-    targets = list(set([GROUP_ORDERS_ID, GLAVNIY_ADMIN_ID]))
+    caption = as_order_caption(admin_text)
+    targets = list(dict.fromkeys([GROUP_ORDERS_ID, GLAVNIY_ADMIN_ID]))
     for target_id in targets:
         try:
             if first_photo:
-                # Rasm + barcha ma'lumot birgalikda 1 post
-                await bot.send_photo(
+                sent_message = await bot.send_photo(
                     target_id,
                     photo=first_photo,
                     caption=caption,
                     parse_mode="HTML",
-                    reply_markup=order_actions_kb(order.id)
+                    reply_markup=order_status_kb(order.id, getattr(order_details or order, "status", "pending"))
                 )
+                has_media = True
             else:
-                # Rasm yo'q — oddiy xabar
-                await bot.send_message(
+                sent_message = await bot.send_message(
                     target_id,
                     admin_text,
                     parse_mode="HTML",
-                    reply_markup=order_actions_kb(order.id)
+                    reply_markup=order_status_kb(order.id, getattr(order_details or order, "status", "pending"))
                 )
+                has_media = False
+
+            if target_id == GROUP_ORDERS_ID:
+                async with AsyncSessionLocal() as session:
+                    await set_order_channel_message(
+                        session,
+                        order.id,
+                        target_id,
+                        sent_message.message_id,
+                        has_media=has_media,
+                    )
         except Exception as e:
             print(f"❌ Target {target_id}ga xabar yuborishda xato: {e}")
 
@@ -387,14 +373,12 @@ async def receive_check(message: Message, state: FSMContext, bot: Bot):
     from bot.keyboards.admin_kb import check_confirm_kb
     kb = check_confirm_kb(order_id)
 
-    # Chek guruhiga yuborish — xato bo'lsa adminlarga to'g'ridan
     file_id  = message.photo[-1].file_id if message.photo else None
     doc_id   = message.document.file_id if message.document else None
     is_photo = bool(file_id)
 
     sent_ok = False
 
-    # 1. Chek guruhiga urinib ko'ramiz
     try:
         if is_photo:
             await bot.send_photo(GROUP_CHECKS_ID, photo=file_id,
@@ -407,7 +391,6 @@ async def receive_check(message: Message, state: FSMContext, bot: Bot):
     except Exception as e:
         print(f"⚠️ Chek guruhiga yuborishda xato ({GROUP_CHECKS_ID}): {e}")
 
-    # 2. Adminlarga to'g'ridan yuborish (552003748 ham chek admini)
     check_targets = list(set([GLAVNIY_ADMIN_ID, 552003748]))
     for admin_id in check_targets:
         try:
@@ -450,7 +433,6 @@ async def my_orders(message: Message):
             .limit(10)
         )
         orders = result.scalars().all()
-        # Session ichida ma'lumot olish
         orders_data = []
         for o in orders:
             orders_data.append({
