@@ -10,6 +10,7 @@ from database.crud import (
     get_pending_orders, get_all_orders, get_order_with_items,
     update_order_status, get_product_stocks, set_product_stock
 )
+from bot.handlers.order_channel import refresh_order_channel_message
 from bot.middlewares.admin_check import is_admin, ADMIN_IDS, GROUP_CHAT_ID, GLAVNIY_ADMIN_ID
 from bot.keyboards.admin_kb import (
     admin_menu_kb, order_actions_kb, postal_kb,
@@ -27,7 +28,28 @@ FORMA_CAT_IDS = [1, 2]  # Razmer so'raladigan kategoriyalar
 GROUP_CHECKS_ID  = int(os.getenv("GROUP_CHECKS_ID",  "-5284654949"))
 
 
-# ─── FSM ──────────────────────────────────────────────────────────────────────
+async def _append_callback_status(callback: CallbackQuery, status_text: str):
+    try:
+        if callback.message.caption is not None:
+            await callback.message.edit_caption(
+                caption=(callback.message.caption or "") + status_text,
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+        else:
+            await callback.message.edit_text(
+                (callback.message.text or "") + status_text,
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+    except Exception:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+
+# ─── FSM ─────────────────────────────────────────────────────────────────────
 class AddProductState(StatesGroup):
     category    = State()
     name        = State()
@@ -84,7 +106,7 @@ async def show_pending_orders(message: Message):
         text = (
             f"🆕 <b>Buyurtma #{order.id}</b>\n"
             f"👤 {order.user.full_name}\n"
-            f"📱 {order.user.phone or '—'}\n"
+            f"📱 {order.customer_phone or order.user.phone or '—'}\n"
             f"📍 {order.delivery_address}\n"
             f"💰 {int(order.total_price):,} so'm\n"
             f"📅 {order.created_at.strftime('%d.%m.%Y %H:%M')}"
@@ -121,30 +143,17 @@ async def show_confirmed_orders(message: Message):
     )
 
     for order in orders:
-        # Mahsulotlar ro'yxati
         items_text = ""
         for item in order.items:
             extra = f" ({item.size})" if item.size else ""
             extra += f" | ✍️{item.player_name}" if item.player_name else ""
             items_text += f"• {item.product.name if item.product else 'N/A'}{extra} × {item.quantity}\n"
 
-        # Izohdan ism va telefon ajratamiz
-        comment = order.comment or ""
-        name_part = ""
-        phone_part = ""
-        if "Ism:" in comment and "Tel:" in comment:
-            parts = comment.split("|")
-            for p in parts:
-                if "Ism:" in p:
-                    name_part = p.replace("Ism:", "").strip()
-                if "Tel:" in p:
-                    phone_part = p.replace("Tel:", "").strip()
-
         text = (
             f"✅ <b>Buyurtma #{order.id}</b>\n"
             f"{'─' * 24}\n"
-            f"👤 {name_part or order.user.full_name}\n"
-            f"📱 {phone_part or order.user.phone or '—'}\n"
+            f"👤 {order.customer_name or order.user.full_name}\n"
+            f"📱 {order.customer_phone or order.user.phone or '—'}\n"
             f"📍 {order.delivery_address}\n"
             f"{'─' * 24}\n"
             f"{items_text}"
@@ -179,7 +188,7 @@ async def show_all_orders(message: Message):
     await message.answer(text, parse_mode="HTML")
 
 
-# ─── MAHSULOT QO'SHISH — FSM ──────────────────────────────────────────────────
+# ─── MAHSULOT QO'SHISH — FSM ─────────────────────────────────────────────────
 @router.message(F.text == "➕ Mahsulot qo'shish")
 async def start_add_product(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
@@ -256,7 +265,6 @@ async def add_product_stocks(message: Message, state: FSMContext):
     data = await state.get_data()
     cat_id = data.get("category_id", 0)
 
-    # Razmer so'ralmaydigan kategoriyalar (4 = ism yozish)
     if cat_id == 4:
         await _save_product_final(message, state)
         return
@@ -265,10 +273,10 @@ async def add_product_stocks(message: Message, state: FSMContext):
     data = await state.get_data()
     cat_id = data.get("category_id", 0)
 
-    if cat_id == 3:  # Butsalar & Sarakonjoshkalar
+    if cat_id == 3:
         size_hint = "37:5 38:10 39:8 40:3 41:5 42:2"
         size_info = "Butsalar uchun: 36-45 raqamli o'lchamlar"
-    else:  # Formalar, Retro
+    else:
         size_hint = "S:5 M:10 L:8 XL:3"
         size_info = "Kiyimlar uchun: XS S M L XL XXL 3XL"
 
@@ -311,9 +319,7 @@ async def save_product_with_stocks(message: Message, state: FSMContext):
 
     await state.update_data(stocks=parsed)
 
-    # Tasdiqlash
     sizes_text = "  ".join(f"{s}: {q} ta" for s, q in parsed.items())
-    data = await state.get_data()
     await message.answer(
         f"✅ <b>Kiritilgan o'lchamlar:</b>\n{sizes_text}\n\n"
         "Saqlashni tasdiqlang yoki qayta kiriting:",
@@ -363,7 +369,6 @@ async def _save_product_final(message: Message, state: FSMContext):
             is_active=True,
             in_stock=True
         )
-        # Stocklarni saqlash
         for size, qty in stocks.items():
             await set_product_stock(session, product.id, size, qty)
 
@@ -554,7 +559,6 @@ async def check_confirmed(callback: CallbackQuery, bot: Bot):
         if not order:
             await callback.answer("Buyurtma topilmadi!", show_alert=True)
             return
-        # Allaqachon tasdiqlangan bo'lsa — qayta bosilmasin
         if order.status.value != "pending":
             await callback.answer(
                 f"⚠️ Bu chek allaqachon ko'rib chiqilgan!",
@@ -564,35 +568,10 @@ async def check_confirmed(callback: CallbackQuery, bot: Bot):
         await update_order_status(session, order_id, "confirmed")
         order = await get_order_with_items(session, order_id)
 
-    # Stock -1
-    try:
-        from database.crud import decrease_stock
-        async with AsyncSessionLocal() as session:
-            for item in (order.items or []):
-                if item.size:
-                    await decrease_stock(session, item.product_id, item.size, item.quantity)
-    except Exception as e:
-        print(f"Stock decrease xatosi: {e}")
-
-    # Tugmalarni o'chirish + kim tasdiqlaganini ko'rsatish
-    try:
-        await callback.message.edit_caption(
-            caption=callback.message.caption + f"\n\n✅ <b>To'lov tasdiqlandi</b> — {who}",
-            parse_mode="HTML",
-            reply_markup=None
-        )
-    except:
-        try:
-            await callback.message.edit_text(
-                callback.message.text + f"\n\n✅ <b>To'lov tasdiqlandi</b> — {who}",
-                parse_mode="HTML",
-                reply_markup=None
-            )
-        except:
-            pass
+    await refresh_order_channel_message(bot, order, actor=who)
+    await _append_callback_status(callback, f"\n\n✅ <b>To'lov tasdiqlandi</b> — {who}")
     await callback.answer("✅ Tasdiqlandi!")
 
-    # Mijozga 1 marta xabar
     if order and order.user:
         try:
             await bot.send_message(
@@ -618,21 +597,7 @@ async def check_rejected(callback: CallbackQuery, bot: Bot):
             await callback.answer("⚠️ Bu chek allaqachon ko'rib chiqilgan!", show_alert=True)
             return
 
-    try:
-        await callback.message.edit_caption(
-            caption=callback.message.caption + f"\n\n❌ <b>Chek rad etildi</b> — {who}",
-            parse_mode="HTML",
-            reply_markup=None
-        )
-    except:
-        try:
-            await callback.message.edit_text(
-                callback.message.text + f"\n\n❌ <b>Chek rad etildi</b> — {who}",
-                parse_mode="HTML",
-                reply_markup=None
-            )
-        except:
-            pass
+    await _append_callback_status(callback, f"\n\n❌ <b>Chek rad etildi</b> — {who}")
     await callback.answer("❌ Chek rad etildi")
 
     async with AsyncSessionLocal() as session:
@@ -655,28 +620,24 @@ async def check_rejected(callback: CallbackQuery, bot: Bot):
 # ─── POCHTAGA TOPSHIRILDI (Tasdiqlangan buyurtmalardan) ───────────────────────
 @router.callback_query(F.data.startswith("admin_deliver_"))
 async def admin_deliver(callback: CallbackQuery, bot: Bot):
-    """
-    Admin 'Pochtaga topshirildi' bosdi.
-    - Order → delivering
-    - Tugma yo'qoladi (1 martalik)
-    - Mijozga xabar
-    - 2-3 kundan keyin sharh so'rash (hozircha darhol)
-    """
     order_id = int(callback.data.split("_")[2])
     who = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
     async with AsyncSessionLocal() as session:
-        await update_order_status(session, order_id, "delivering")
+        order = await get_order_with_items(session, order_id)
+        if not order:
+            await callback.answer("Buyurtma topilmadi!", show_alert=True)
+            return
+        if order.status.value not in {"confirmed", "delivering"}:
+            await callback.answer(f"Bu buyurtma hozir: {order.status.value}", show_alert=True)
+            return
+        if order.status.value != "delivering":
+            await update_order_status(session, order_id, "delivering")
         order = await get_order_with_items(session, order_id)
 
-    # Tugmalarni o'chirish
-    try:
-        await callback.message.edit_text(
-            callback.message.text + f"\n\n📦 <b>Pochtaga topshirildi</b> — {who}",
-            parse_mode="HTML"
-        )
-    except:
-        pass
+    refreshed = await refresh_order_channel_message(bot, order, actor=who)
+    if not refreshed:
+        await _append_callback_status(callback, f"\n\n📦 <b>Pochtaga topshirildi</b> — {who}")
     await callback.answer("📦 Pochtaga topshirildi!")
 
     if order and order.user:
@@ -691,33 +652,14 @@ async def admin_deliver(callback: CallbackQuery, bot: Bot):
         except Exception as e:
             print(f"Mijozga xabar yuborishda xato: {e}")
 
-        # Sharh so'rash — 2-3 kundan keyin ideal, hozircha asyncio delay bilan
-        import asyncio
-        async def delayed_review():
-            await asyncio.sleep(60 * 60 * 48)  # 48 soat
-            try:
-                from bot.handlers.review import ask_review
-                items = order.items or []
-                prod_id = items[0].product_id if items else None
-                await ask_review(bot, order.user.telegram_id, order_id, prod_id)
-            except Exception as e:
-                print(f"Review so'rovda xato: {e}")
-
-        asyncio.create_task(delayed_review())
-
 
 # ─── BUYURTMANI GURUHDA TASDIQLASH ────────────────────────────────────────────
 @router.callback_query(F.data.startswith("admin_confirm_"))
 async def admin_confirm_group(callback: CallbackQuery, bot: Bot):
-    """
-    Guruhda buyurtma tasdiqlash — 1 martalik.
-    Tugmalar yo'qoladi. Mijozga faqat tasdiqlandi xabari.
-    """
     order_id = int(callback.data.split("_")[2])
     who = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
     async with AsyncSessionLocal() as session:
-        # Allaqachon tasdiqlangan bo'lsa — qayta bosilmasin
         order = await get_order_with_items(session, order_id)
         if not order:
             await callback.answer("Buyurtma topilmadi!", show_alert=True)
@@ -728,23 +670,15 @@ async def admin_confirm_group(callback: CallbackQuery, bot: Bot):
         await update_order_status(session, order_id, "confirmed")
         order = await get_order_with_items(session, order_id)
 
-    # Tugmalarni o'chirish (1 martalik)
-    try:
-        await callback.message.edit_text(
-            callback.message.text + f"\n\n✅ <b>Tasdiqlandi</b> — {who}",
-            parse_mode="HTML"
-        )
-    except:
-        pass
+    refreshed = await refresh_order_channel_message(bot, order, actor=who)
+    if not refreshed:
+        await _append_callback_status(callback, f"\n\n✅ <b>Tasdiqlandi</b> — {who}")
     await callback.answer("✅ Tasdiqlandi!")
 
-    # Mijozga faqat tasdiqlandi xabari — to'lov turiga qarab
     if order and order.user:
         pay_type = order.payment_type.value if order.payment_type else ""
         try:
             if pay_type == "card":
-                # Card — chek allaqachon yuborilgan bo'lishi kerak
-                # Faqat tasdiqlandi xabari
                 await bot.send_message(
                     order.user.telegram_id,
                     f"✅ <b>Buyurtma #{order_id} tasdiqlandi!</b>\n\n"
@@ -752,7 +686,6 @@ async def admin_confirm_group(callback: CallbackQuery, bot: Bot):
                     parse_mode="HTML"
                 )
             elif pay_type == "credit":
-                # Nasiya — faqat tasdiqlandi xabari, link yo'q
                 await bot.send_message(
                     order.user.telegram_id,
                     f"✅ <b>Buyurtma #{order_id} tasdiqlandi!</b>\n\n"
@@ -769,16 +702,19 @@ async def admin_cancel_group(callback: CallbackQuery, bot: Bot):
     who = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
     async with AsyncSessionLocal() as session:
+        order = await get_order_with_items(session, order_id)
+        if not order:
+            await callback.answer("Buyurtma topilmadi!", show_alert=True)
+            return
+        if order.status.value in {"done", "cancelled"}:
+            await callback.answer(f"Bu buyurtma allaqachon: {order.status.value}", show_alert=True)
+            return
         await update_order_status(session, order_id, "cancelled")
         order = await get_order_with_items(session, order_id)
 
-    try:
-        await callback.message.edit_text(
-            callback.message.text + f"\n\n❌ <b>Bekor qilindi</b> — {who}",
-            parse_mode="HTML"
-        )
-    except:
-        pass
+    refreshed = await refresh_order_channel_message(bot, order, actor=who)
+    if not refreshed:
+        await _append_callback_status(callback, f"\n\n❌ <b>Bekor qilindi</b> — {who}")
     await callback.answer("❌ Bekor qilindi")
 
     if order and order.user:
@@ -787,6 +723,42 @@ async def admin_cancel_group(callback: CallbackQuery, bot: Bot):
                 order.user.telegram_id,
                 f"❌ <b>Buyurtma #{order_id} bekor qilindi.</b>\n\n"
                 f"Savollar uchun @formachi_admin ga yozing.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            print(f"Mijozga xabar yuborishda xato: {e}")
+
+
+@router.callback_query(F.data.startswith("admin_done_"))
+async def admin_done_group(callback: CallbackQuery, bot: Bot):
+    order_id = int(callback.data.split("_")[2])
+    who = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
+
+    async with AsyncSessionLocal() as session:
+        order = await get_order_with_items(session, order_id)
+        if not order:
+            await callback.answer("Buyurtma topilmadi!", show_alert=True)
+            return
+        if order.status.value == "done":
+            await callback.answer("Bu buyurtma allaqachon yakunlangan", show_alert=True)
+            return
+        if order.status.value == "cancelled":
+            await callback.answer("Bekor qilingan buyurtmani yakunlab bo'lmaydi", show_alert=True)
+            return
+        await update_order_status(session, order_id, "done")
+        order = await get_order_with_items(session, order_id)
+
+    refreshed = await refresh_order_channel_message(bot, order, actor=who)
+    if not refreshed:
+        await _append_callback_status(callback, f"\n\n✔️ <b>Mijoz qabul qildi</b> — {who}")
+    await callback.answer("✔️ Yakunlandi")
+
+    if order and order.user:
+        try:
+            await bot.send_message(
+                order.user.telegram_id,
+                f"✔️ <b>Buyurtma #{order_id} yakunlandi.</b>\n\n"
+                "FORMACHI bilan xarid qilganingiz uchun rahmat!",
                 parse_mode="HTML"
             )
         except Exception as e:
