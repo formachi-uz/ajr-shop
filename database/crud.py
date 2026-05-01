@@ -351,6 +351,25 @@ async def update_order_total(session: AsyncSession, order_id: int, total: float)
     await session.commit()
 
 
+async def set_order_channel_message(
+    session: AsyncSession,
+    order_id: int,
+    chat_id: int,
+    message_id: int,
+    has_media: bool = False,
+):
+    await session.execute(
+        update(Order)
+        .where(Order.id == order_id)
+        .values(
+            order_channel_chat_id=chat_id,
+            order_channel_message_id=message_id,
+            order_channel_has_media=has_media,
+        )
+    )
+    await session.commit()
+
+
 async def update_order_status(session: AsyncSession, order_id: int, status: str):
     order = await get_order_with_items(session, order_id)
     if not order:
