@@ -189,6 +189,9 @@ class Order(Base):
     customer_phone = Column(String(20), nullable=True)
     total_price = Column(Float, default=0.0)
     receipt_file_id = Column(String(500), nullable=True)
+    order_channel_chat_id = Column(BigInteger, nullable=True)
+    order_channel_message_id = Column(Integer, nullable=True)
+    order_channel_has_media = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
