@@ -21,6 +21,10 @@ router = Router()
 ACTIVE_IMPORT_ADMINS: set[int] = set()
 
 
+def is_active_import_message(message: Message) -> bool:
+    return bool(message.from_user and message.from_user.id in ACTIVE_IMPORT_ADMINS)
+
+
 async def open_import_mode(message: Message, state: FSMContext, admin_id: int):
     ACTIVE_IMPORT_ADMINS.add(admin_id)
     await state.set_state(ChannelImportState.waiting_posts)
@@ -69,10 +73,8 @@ async def import_forwarded_post_state_fixed(message: Message, state: FSMContext)
     await handle_import_message(message, state)
 
 
-@router.message(F.photo | F.caption | F.text)
+@router.message(is_active_import_message, F.photo | F.caption | F.text)
 async def import_forwarded_post_global_fixed(message: Message, state: FSMContext):
-    if not message.from_user or message.from_user.id not in ACTIVE_IMPORT_ADMINS:
-        return
     await handle_import_message(message, state)
 
 
