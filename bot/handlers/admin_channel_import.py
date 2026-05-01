@@ -112,17 +112,21 @@ def importer_kb() -> InlineKeyboardMarkup:
 
 @router.message(F.text.in_({"📥 Kanaldan import", "/importkanal", "/import_channel"}))
 async def start_channel_import_from_text(message: Message, state: FSMContext):
-    await start_channel_import(message, state)
+    await start_channel_import(message, state, actor_id=message.from_user.id if message.from_user else None)
 
 
 @router.callback_query(F.data == "channel_import_start")
 async def start_channel_import_from_callback(callback: CallbackQuery, state: FSMContext):
-    await start_channel_import(callback.message, state)
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Ruxsat yo'q", show_alert=True)
+        return
+    await start_channel_import(callback.message, state, actor_id=callback.from_user.id)
     await callback.answer("Import rejimi yoqildi")
 
 
-async def start_channel_import(message: Message, state: FSMContext):
-    if not is_admin(message.chat.id if message.from_user is None else message.from_user.id):
+async def start_channel_import(message: Message, state: FSMContext, actor_id: int | None = None):
+    user_id = actor_id or (message.from_user.id if message.from_user else message.chat.id)
+    if not is_admin(user_id):
         await message.answer("⛔ Ruxsat yo'q")
         return
     await state.set_state(ChannelImportState.waiting_posts)
@@ -140,6 +144,9 @@ async def start_channel_import(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "channel_import_stop")
 async def stop_channel_import_callback(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Ruxsat yo'q", show_alert=True)
+        return
     await state.clear()
     await callback.message.answer("✅ Kanaldan import tugatildi.", reply_markup=admin_menu_kb())
     await callback.answer("Tugatildi")
@@ -147,7 +154,7 @@ async def stop_channel_import_callback(callback: CallbackQuery, state: FSMContex
 
 @router.message(ChannelImportState.waiting_posts)
 async def import_forwarded_post(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+    if not message.from_user or not is_admin(message.from_user.id):
         return
 
     text = (message.caption or message.text or "").strip()
