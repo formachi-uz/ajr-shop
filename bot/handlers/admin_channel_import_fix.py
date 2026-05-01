@@ -18,9 +18,11 @@ from bot.keyboards.admin_kb import admin_menu_kb
 from bot.middlewares.admin_check import is_admin
 
 router = Router()
+ACTIVE_IMPORT_ADMINS: set[int] = set()
 
 
-async def open_import_mode(message: Message, state: FSMContext):
+async def open_import_mode(message: Message, state: FSMContext, admin_id: int):
+    ACTIVE_IMPORT_ADMINS.add(admin_id)
     await state.set_state(ChannelImportState.waiting_posts)
     await message.answer(
         "📥 <b>Kanaldan mahsulot import qilish yoqildi</b>\n\n"
@@ -39,7 +41,7 @@ async def start_channel_import_fixed(callback: CallbackQuery, state: FSMContext)
     if not is_admin(callback.from_user.id):
         await callback.answer("Ruxsat yo'q", show_alert=True)
         return
-    await open_import_mode(callback.message, state)
+    await open_import_mode(callback.message, state, callback.from_user.id)
     await callback.answer("Import rejimi yoqildi")
 
 
@@ -48,7 +50,7 @@ async def start_channel_import_text_fixed(message: Message, state: FSMContext):
     if not message.from_user or not is_admin(message.from_user.id):
         await message.answer("⛔ Ruxsat yo'q")
         return
-    await open_import_mode(message, state)
+    await open_import_mode(message, state, message.from_user.id)
 
 
 @router.callback_query(F.data == "channel_import_stop")
@@ -56,18 +58,31 @@ async def stop_channel_import_fixed(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("Ruxsat yo'q", show_alert=True)
         return
+    ACTIVE_IMPORT_ADMINS.discard(callback.from_user.id)
     await state.clear()
     await callback.message.answer("✅ Kanaldan import tugatildi.", reply_markup=admin_menu_kb())
     await callback.answer("Tugatildi")
 
 
 @router.message(ChannelImportState.waiting_posts)
-async def import_forwarded_post_fixed(message: Message, state: FSMContext):
+async def import_forwarded_post_state_fixed(message: Message, state: FSMContext):
+    await handle_import_message(message, state)
+
+
+@router.message(F.photo | F.caption | F.text)
+async def import_forwarded_post_global_fixed(message: Message, state: FSMContext):
+    if not message.from_user or message.from_user.id not in ACTIVE_IMPORT_ADMINS:
+        return
+    await handle_import_message(message, state)
+
+
+async def handle_import_message(message: Message, state: FSMContext):
     if not message.from_user or not is_admin(message.from_user.id):
         return
 
     text = (message.caption or message.text or "").strip()
     if text.lower() in STOP_WORDS:
+        ACTIVE_IMPORT_ADMINS.discard(message.from_user.id)
         await state.clear()
         await message.answer("✅ Kanaldan import tugatildi.", reply_markup=admin_menu_kb())
         return
