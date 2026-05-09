@@ -30,7 +30,6 @@ class DeliveryAreaState(StatesGroup):
 
 
 class ReceivedReviewState(StatesGroup):
-    waiting_city = State()
     waiting_text = State()
 
 
@@ -49,6 +48,20 @@ def rating_kb(order_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="4⭐", callback_data=f"delivery_rate_4_{order_id}"),
         InlineKeyboardButton(text="5⭐", callback_data=f"delivery_rate_5_{order_id}"),
     ]])
+
+
+def infer_review_city(address: str | None) -> str:
+    value = (address or "").strip()
+    lower = value.lower()
+    if not value:
+        return "—"
+    if "toshkent" in lower or "ташкент" in lower:
+        return "Toshkent"
+    for sep in [",", "|", "-"]:
+        if sep in value:
+            value = value.split(sep, 1)[0].strip()
+            break
+    return value[:40] if value else "—"
 
 
 @router.message(order.OrderState.waiting_phone)
@@ -247,6 +260,7 @@ async def review_already(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("delivery_yes_"))
 async def customer_received_order(callback: CallbackQuery, state: FSMContext):
     order_id = int(callback.data.split("_")[2])
+    review_city = "—"
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(session, callback.from_user.id)
         if not user:
@@ -265,12 +279,12 @@ async def customer_received_order(callback: CallbackQuery, state: FSMContext):
         if review_exists.scalar_one_or_none():
             await callback.answer("Sharh avval qabul qilingan", show_alert=True)
             return
+        review_city = infer_review_city(order_obj.delivery_address)
         if order_obj.status in {OrderStatus.CONFIRMED, OrderStatus.DELIVERING}:
             order_obj.status = OrderStatus.DONE
             await session.commit()
 
-    await state.set_state(ReceivedReviewState.waiting_city)
-    await state.update_data(received_order_id=order_id)
+    await state.update_data(received_order_id=order_id, received_city=review_city)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
@@ -278,27 +292,11 @@ async def customer_received_order(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "✅ <b>Mahsulotni olganingiz belgilandi!</b>\n\n"
         "Faoliyatimiz uchun iliq fikringizni qoldirsangiz juda xursand bo'lamiz.\n\n"
-        "Avval qaysi shahar/viloyatdan buyurtma qilgandingiz?\n"
-        "<i>Masalan: Toshkent, Samarqand, Farg'ona</i>",
-        parse_mode="HTML",
-    )
-    await callback.answer("Rahmat")
-
-
-@router.message(ReceivedReviewState.waiting_city)
-async def received_city(message: Message, state: FSMContext):
-    city = (message.text or "").strip()
-    if len(city) < 2:
-        await message.answer("Shahar yoki viloyat nomini yozing.")
-        return
-    data = await state.get_data()
-    order_id = int(data.get("received_order_id") or 0)
-    await state.update_data(received_city=city)
-    await message.answer(
         "⭐ <b>Faoliyatimizni baholang:</b>",
         parse_mode="HTML",
         reply_markup=rating_kb(order_id),
     )
+    await callback.answer("Rahmat")
 
 
 @router.callback_query(F.data.startswith("delivery_rate_"))
@@ -355,12 +353,7 @@ async def save_received_review(message: Message, state: FSMContext, bot: Bot):
                 product_ids.append(item.product_id)
                 product_names.append(item.product.name if item.product else f"Mahsulot #{item.product_id}")
         if not product_ids:
-            product_ids = [None]
             product_names = ["Mahsulot"]
-
-        text_value = f"Shahar: {city}"
-        if comment:
-            text_value += f"\nSharh: {comment}"
 
         for product_id in product_ids:
             session.add(Review(
@@ -368,7 +361,7 @@ async def save_received_review(message: Message, state: FSMContext, bot: Bot):
                 product_id=product_id,
                 order_id=order_id,
                 rating=rating,
-                text=text_value,
+                text=comment,
                 is_visible=True,
             ))
         await session.commit()
