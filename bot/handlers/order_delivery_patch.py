@@ -1,4 +1,4 @@
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -8,11 +8,20 @@ from sqlalchemy.orm import selectinload
 from bot.handlers import order
 from bot.handlers.cart import get_cart, format_cart_text
 from bot.keyboards.main_menu import cancel_kb
+from bot.middlewares.admin_check import GROUP_CHAT_ID
 from database.db import AsyncSessionLocal
-from database.models import Order, OrderItem, OrderStatus, Review
+from database.models import Order, OrderItem, OrderStatus, Review, User
 from database.crud import get_user_by_telegram_id
 
 router = Router()
+
+STAR_ICONS = {
+    1: "⭐",
+    2: "⭐⭐",
+    3: "⭐⭐⭐",
+    4: "⭐⭐⭐⭐",
+    5: "⭐⭐⭐⭐⭐",
+}
 
 
 class DeliveryAreaState(StatesGroup):
@@ -20,11 +29,26 @@ class DeliveryAreaState(StatesGroup):
     waiting_tashkent_address = State()
 
 
+class ReceivedReviewState(StatesGroup):
+    waiting_city = State()
+    waiting_text = State()
+
+
 def delivery_area_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏙 Toshkent shahri", callback_data="delivery_area_tashkent")],
         [InlineKeyboardButton(text="🚚 Viloyatlar", callback_data="delivery_area_regions")],
     ])
+
+
+def rating_kb(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="1⭐", callback_data=f"delivery_rate_1_{order_id}"),
+        InlineKeyboardButton(text="2⭐", callback_data=f"delivery_rate_2_{order_id}"),
+        InlineKeyboardButton(text="3⭐", callback_data=f"delivery_rate_3_{order_id}"),
+        InlineKeyboardButton(text="4⭐", callback_data=f"delivery_rate_4_{order_id}"),
+        InlineKeyboardButton(text="5⭐", callback_data=f"delivery_rate_5_{order_id}"),
+    ]])
 
 
 @router.message(order.OrderState.waiting_phone)
@@ -162,8 +186,9 @@ async def my_orders_with_received_button(message: Message):
             .limit(10)
         )
         orders = list(result.scalars().all())
+        order_ids = [o.id for o in orders]
         review_result = await session.execute(
-            select(Review.order_id).where(Review.order_id.in_([o.id for o in orders])) if orders else select(Review.order_id).where(Review.order_id == -1)
+            select(Review.order_id).where(Review.order_id.in_(order_ids)) if order_ids else select(Review.order_id).where(Review.order_id == -1)
         )
         reviewed_order_ids = {int(order_id) for order_id in review_result.scalars().all() if order_id}
 
@@ -217,3 +242,158 @@ async def my_orders_with_received_button(message: Message):
 @router.callback_query(F.data.startswith("review_already_"))
 async def review_already(callback: CallbackQuery):
     await callback.answer("Bu buyurtma bo'yicha sharh qabul qilingan", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("delivery_yes_"))
+async def customer_received_order(callback: CallbackQuery, state: FSMContext):
+    order_id = int(callback.data.split("_")[2])
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("Buyurtma topilmadi", show_alert=True)
+            return
+        result = await session.execute(
+            select(Order)
+            .options(selectinload(Order.items).selectinload(OrderItem.product))
+            .where(Order.id == order_id, Order.user_id == user.id)
+        )
+        order_obj = result.scalar_one_or_none()
+        if not order_obj:
+            await callback.answer("Bu buyurtma sizga tegishli emas", show_alert=True)
+            return
+        review_exists = await session.execute(select(Review.id).where(Review.order_id == order_id).limit(1))
+        if review_exists.scalar_one_or_none():
+            await callback.answer("Sharh avval qabul qilingan", show_alert=True)
+            return
+        if order_obj.status in {OrderStatus.CONFIRMED, OrderStatus.DELIVERING}:
+            order_obj.status = OrderStatus.DONE
+            await session.commit()
+
+    await state.set_state(ReceivedReviewState.waiting_city)
+    await state.update_data(received_order_id=order_id)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.message.answer(
+        "✅ <b>Mahsulotni olganingiz belgilandi!</b>\n\n"
+        "Faoliyatimiz uchun iliq fikringizni qoldirsangiz juda xursand bo'lamiz.\n\n"
+        "Avval qaysi shahar/viloyatdan buyurtma qilgandingiz?\n"
+        "<i>Masalan: Toshkent, Samarqand, Farg'ona</i>",
+        parse_mode="HTML",
+    )
+    await callback.answer("Rahmat")
+
+
+@router.message(ReceivedReviewState.waiting_city)
+async def received_city(message: Message, state: FSMContext):
+    city = (message.text or "").strip()
+    if len(city) < 2:
+        await message.answer("Shahar yoki viloyat nomini yozing.")
+        return
+    data = await state.get_data()
+    order_id = int(data.get("received_order_id") or 0)
+    await state.update_data(received_city=city)
+    await message.answer(
+        "⭐ <b>Faoliyatimizni baholang:</b>",
+        parse_mode="HTML",
+        reply_markup=rating_kb(order_id),
+    )
+
+
+@router.callback_query(F.data.startswith("delivery_rate_"))
+async def received_rating(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    rating = int(parts[2])
+    order_id = int(parts[3])
+    await state.set_state(ReceivedReviewState.waiting_text)
+    await state.update_data(received_rating=rating, received_order_id=order_id)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.message.answer(
+        f"Siz <b>{STAR_ICONS.get(rating, '⭐')} ({rating}/5)</b> baho berdingiz.\n\n"
+        "✍️ Qisqacha sharh yozing:\n"
+        "<i>Masalan: Forma sifati zo'r, yetkazish tez bo'ldi!</i>\n\n"
+        "O'tkazib yuborish uchun <b>-</b> yuboring.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(ReceivedReviewState.waiting_text)
+async def save_received_review(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    order_id = int(data.get("received_order_id") or 0)
+    rating = int(data.get("received_rating") or 5)
+    city = data.get("received_city") or "—"
+    comment = None if (message.text or "").strip() == "-" else (message.text or "").strip()
+
+    async with AsyncSessionLocal() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == message.from_user.id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            await state.clear()
+            await message.answer("Foydalanuvchi topilmadi.")
+            return
+        result = await session.execute(
+            select(Order)
+            .options(selectinload(Order.items).selectinload(OrderItem.product))
+            .where(Order.id == order_id, Order.user_id == user.id)
+        )
+        order_obj = result.scalar_one_or_none()
+        if not order_obj:
+            await state.clear()
+            await message.answer("Buyurtma topilmadi.")
+            return
+
+        product_ids = []
+        product_names = []
+        for item in order_obj.items:
+            if item.product_id and item.product_id not in product_ids:
+                product_ids.append(item.product_id)
+                product_names.append(item.product.name if item.product else f"Mahsulot #{item.product_id}")
+        if not product_ids:
+            product_ids = [None]
+            product_names = ["Mahsulot"]
+
+        text_value = f"Shahar: {city}"
+        if comment:
+            text_value += f"\nSharh: {comment}"
+
+        for product_id in product_ids:
+            session.add(Review(
+                user_id=user.id,
+                product_id=product_id,
+                order_id=order_id,
+                rating=rating,
+                text=text_value,
+                is_visible=True,
+            ))
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        "🙏 <b>Rahmat!</b>\n\n"
+        f"{STAR_ICONS.get(rating, '⭐')} Bahoyingiz va sharhingiz qabul qilindi.\n"
+        "Fikringiz mahsulot sahifasidagi sharhlar bo'limida ko'rinadi.",
+        parse_mode="HTML",
+    )
+
+    review_text = (
+        "⭐ <b>YANGI MIJOZ SHARHI</b>\n"
+        f"{'─' * 24}\n"
+        f"👤 {message.from_user.full_name}"
+        f"{'  @' + message.from_user.username if message.from_user.username else ''}\n"
+        f"🧾 Buyurtma #{order_id}\n"
+        f"📍 {city}\n"
+        f"🛍 {', '.join(product_names)}\n"
+        f"⭐ <b>{rating}/5</b>\n"
+    )
+    if comment:
+        review_text += f"💬 <i>{comment}</i>"
+    try:
+        await bot.send_message(GROUP_CHAT_ID, review_text, parse_mode="HTML")
+    except Exception as exc:
+        print(f"Sharh guruhga yuborilmadi: {exc}")
