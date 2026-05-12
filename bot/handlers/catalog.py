@@ -1,7 +1,9 @@
+import os
+
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.fsm.context import FSMContext
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 from database.db import AsyncSessionLocal
 from database.models import Product, Category, ProductStock
@@ -12,7 +14,15 @@ from database.crud import (
 
 router = Router()
 
+WEB_APP_URL = os.getenv("WEB_APP_URL", "https://webapp-production-8738.up.railway.app")
+
 FORMA_CATEGORIES = [1, 2]
+
+MAIN_CATEGORY_BY_ID = {
+    1: "FORMLAR",
+    2: "RETRO_FORMALAR",
+    3: "BUTSIYLAR",
+}
 
 
 def format_price(product) -> str:
@@ -55,12 +65,19 @@ def products_kb(products_with_stocks: list, category_id: int) -> InlineKeyboardM
             text=f"{prod['name']}{stock_icon} — {price_str}",
             callback_data=f"prod_{prod['id']}"
         )])
-    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="catalog")])
+    rows.append([InlineKeyboardButton(text="⬅️ Katalogga qaytish", callback_data="catalog")])
+    rows.append([InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def product_detail_kb(product_id: int, cat_id: int, has_stock: bool) -> InlineKeyboardMarkup:
     rows = []
+    rows.append([
+        InlineKeyboardButton(
+            text="🌐 Saytda to'liq ko'rish",
+            web_app=WebAppInfo(url=f"{WEB_APP_URL}/product/{product_id}"),
+        )
+    ])
     if has_stock:
         rows.append([
             InlineKeyboardButton(text="🛒 Savatga", callback_data=f"add_cart_{product_id}"),
@@ -111,10 +128,15 @@ def back_print_kb(product_id: int, buy_now: bool = False) -> InlineKeyboardMarku
 # ─── Helper: mahsulotlarni stocklar bilan yuklash ─────────────────────────────
 async def _load_products_with_stocks(session, category_id: int):
     """Kategoriya mahsulotlarini stocklar bilan birga yuklash — dict sifatida"""
+    category_filter = Product.category_id == category_id
+    main_category = MAIN_CATEGORY_BY_ID.get(category_id)
+    if main_category:
+        category_filter = or_(Product.category_id == category_id, Product.main_category == main_category)
+
     result = await session.execute(
         select(Product)
-        .where(Product.category_id == category_id, Product.is_active == True)
-        .order_by(Product.id)
+        .where(category_filter, Product.is_active == True)
+        .order_by(Product.id.desc())
     )
     products = result.scalars().all()
 
@@ -195,12 +217,13 @@ async def callback_main_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cat_"))
 async def show_category_products(callback: CallbackQuery):
+    await callback.answer()
     category_id = int(callback.data.split("_")[1])
 
     async with AsyncSessionLocal() as session:
         category = await get_category_by_id(session, category_id)
         if not category:
-            await callback.answer("Kategoriya topilmadi!", show_alert=True)
+            await callback.message.answer("⚠️ Kategoriya topilmadi. Katalogni qaytadan oching.")
             return
         # Mahsulot va stocklarni session ichida yuklash
         products_with_stocks = await _load_products_with_stocks(session, category_id)
@@ -210,7 +233,29 @@ async def show_category_products(callback: CallbackQuery):
         cat_desc  = category.description
 
     if not products_with_stocks:
-        await callback.answer("😕 Bu kategoriyada hozircha mahsulot yo'q", show_alert=True)
+        text = (
+            f"{cat_emoji} <b>{cat_name}</b>\n\n"
+            "😕 Bu kategoriyada hozircha mahsulot yo'q.\n\n"
+            "Admin paneldan mahsulot qo'shganda shu kategoriyani tanlang."
+        )
+        try:
+            await callback.message.edit_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Katalogga qaytish", callback_data="catalog")],
+                    [InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="main_menu")],
+                ])
+            )
+        except:
+            await callback.message.answer(
+                text,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Katalogga qaytish", callback_data="catalog")],
+                    [InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="main_menu")],
+                ])
+            )
         return
 
     text = f"{cat_emoji} <b>{cat_name}</b>\n"
@@ -228,7 +273,6 @@ async def show_category_products(callback: CallbackQuery):
             text, parse_mode="HTML",
             reply_markup=products_kb(products_with_stocks, category_id)
         )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("prod_"))
